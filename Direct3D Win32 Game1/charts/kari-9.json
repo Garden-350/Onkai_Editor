@@ -1,0 +1,26 @@
+{
+"notes": [
+{"lane": 2,"type": 0,"time": 13},
+{"lane": 3,"type": 0,"time": 12.8667},
+{"lane": 2,"type": 0,"time": 12.7333},
+{"lane": 3,"type": 0,"time": 12.6},
+{"lane": 2,"type": 0,"time": 12.4667},
+{"lane": 3,"type": 0,"time": 12.3333},
+{"lane": 2,"type": 1,"time": 12.2},
+{"lane": 2,"type": 2,"time": 12.1333},
+{"lane": 2,"type": 2,"time": 12.0667},
+{"lane": 2,"type": 2,"time": 12},
+{"lane": 2,"type": 2,"time": 11.9333},
+{"lane": 2,"type": 2,"time": 11.8667},
+{"lane": 2,"type": 2,"time": 11.8},
+{"lane": 2,"type": 2,"time": 11.7333},
+{"lane": 3,"type": 1,"time": 12.2},
+{"lane": 3,"type": 2,"time": 12.1333},
+{"lane": 3,"type": 2,"time": 12.0667},
+{"lane": 3,"type": 2,"time": 12},
+{"lane": 3,"type": 2,"time": 11.9333},
+{"lane": 3,"type": 2,"time": 11.8667},
+{"lane": 3,"type": 2,"time": 11.8},
+{"lane": 3,"type": 2,"time": 11.7333}
+]
+}

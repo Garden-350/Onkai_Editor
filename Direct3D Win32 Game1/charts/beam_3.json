@@ -1,0 +1,8 @@
+{
+"notes": [
+{"lane": 4,"type": 0,"time": 0.45}
+],
+"beams": [
+{"lane": 0,"startTime": 0.5,"endTime": 1,"warningTime": 0.4}
+]
+}

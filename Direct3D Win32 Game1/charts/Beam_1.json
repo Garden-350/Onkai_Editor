@@ -1,0 +1,15 @@
+{
+"notes": [
+{"lane": 0,"type": 0,"time": 0.425},
+{"lane": 2,"type": 1,"time": 0.56},
+{"lane": 2,"type": 2,"time": 0.64},
+{"lane": 2,"type": 2,"time": 0.72},
+{"lane": 2,"type": 2,"time": 0.8},
+{"lane": 2,"type": 2,"time": 0.885},
+{"lane": 2,"type": 2,"time": 0.965}
+]
+"beams": [
+{"lane": 0,"startTime": 1,"endTime": 2,"warningTime": 0.5},
+{"lane": 5,"startTime": 1,"endTime": 2,"warningTime": 0.5}
+]
+}

@@ -1,0 +1,18 @@
+{
+"notes": [
+{"lane": 0,"type": 1,"time": 0.256667},
+{"lane": 0,"type": 2,"time": 0.31},
+{"lane": 0,"type": 2,"time": 0.363333},
+{"lane": 0,"type": 2,"time": 0.423333},
+{"lane": 0,"type": 2,"time": 0.48},
+{"lane": 0,"type": 2,"time": 0.54},
+{"lane": 0,"type": 2,"time": 0.613333},
+{"lane": 0,"type": 2,"time": 0.676667},
+{"lane": 0,"type": 2,"time": 0.733333},
+{"lane": 0,"type": 2,"time": 0.796667},
+{"lane": 0,"type": 2,"time": 0.85},
+{"lane": 0,"type": 2,"time": 0.903333},
+{"lane": 0,"type": 2,"time": 0.953333},
+{"lane": 0,"type": 2,"time": 1.00333}
+]
+}

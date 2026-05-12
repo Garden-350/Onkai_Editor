@@ -1,0 +1,14 @@
+{
+"notes": [
+{"lane": 2,"type": 1,"time": 1.2},
+{"lane": 2,"type": 1,"time": 1.2},
+{"lane": 2,"type": 1,"time": 0.666667},
+{"lane": 2,"type": 3,"time": 0.666667},
+{"lane": 0,"type": 1,"time": 0.133333},
+{"lane": 0,"type": 1,"time": 0.133333},
+{"lane": 0,"type": 1,"time": 0.133333},
+{"lane": 0,"type": 3,"time": 0.133333},
+{"lane": 0,"type": 4,"time": 0.2},
+{"lane": 0,"type": 4,"time": 0.2}
+]
+}
