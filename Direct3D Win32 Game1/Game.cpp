@@ -213,6 +213,7 @@ void Game::Update(DX::StepTimer const& timer)
                 longStart = false;
             }
         }
+        //Šm”F—p
     }
 
 
