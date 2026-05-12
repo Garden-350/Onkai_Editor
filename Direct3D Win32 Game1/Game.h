@@ -106,6 +106,8 @@ private:
     float scrollSpeed = 0.05f;
     float musicTimeInBeats = 0.0f;
     float editorBeat = 0.0f;
+    float LongStartTime = 0.0f;
+    float LongInterval = 0.125f;    //8分音符間隔
 
     float currentBeat = 0.0f;
 
@@ -118,6 +120,7 @@ private:
     int success = 0;            //判定のカウント
     int miss = 0;               //ミスのカウント
     int bpm;
+    int LongStartLane = 0;
 
     bool fastLong = false;
     bool fastTime = false;
@@ -128,6 +131,7 @@ private:
     bool isLong = false;
     bool oknort = false;
     bool KeySpacePrev = false;
+    bool LongStartPlaced = false;   //ロングノーツの最初判定(置くとき)
 
     BGMstate bgmstate = BGMstate::stop;
 

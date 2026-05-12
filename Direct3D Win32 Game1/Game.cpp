@@ -156,6 +156,12 @@ void Game::Update(DX::StepTimer const& timer)
     {
         mirrorMode = false;
     }
+    // ImGuiのボタン群のあたりに追加
+    ImGui::SliderFloat("Long Interval", &LongInterval, 0.03f, 0.5f);
+    if (LongStartPlaced)
+    {
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), ">>> START placed! Click END position <<<");
+    }
 
     if (oknort == false)
     {
@@ -189,31 +195,39 @@ void Game::Update(DX::StepTimer const& timer)
             float clickedTime = clickedBeat * secondsPerBeat;
 
             // ===== STARTノーツ =====
-            if (mousePressed && currentNoteType == LONG_START && !longStart)
+            if (mousePressed && currentNoteType == LONG_START)
             {
-                notes.push_back(Note(clickedLane, clickedTime, LONG_START));
-                longStart = true;
-                breakTime = clickedBeat; // 次のCENTER配置用
-            }
-
-            if (mouseDown && longStart)
-            {
-            float currentBeat = clickedBeat;
-
-            if (fabs(currentBeat - breakTime) > longInterval)
-            {
-                notes.push_back(Note(clickedLane, clickedTime, LONG_CENTER));
-                breakTime = currentBeat;
-            }
+                if (!LongStartPlaced)
+                {
+                    notes.push_back(Note(clickedLane, clickedTime, LONG_START));
+                    LongStartPlaced = true;
+                    LongStartLane = clickedLane;
+                    LongStartTime = clickedTime;
                 }
+                else
+                {
+                    //2クリック目　CENTER自動生成＋END配置
+                    float startT = LongStartTime;
+                    float endT = clickedTime;
 
-            if (!mouseDown && longStart)
-            {
-                // 長押しが終わったらSTART状態だけリセット
-                longStart = false;
+                    if (endT > startT)
+                    {
+                        float t = startT + LongInterval;
+                        while (t < endT - LongInterval * 0.5f)
+                        {
+                            notes.push_back(Note(LongStartLane, t, LONG_CENTER));
+                            t += LongInterval;
+                        }
+                        notes.push_back(Note(LongStartLane, endT, LONG_END));
+
+                        std::sort(notes.begin(), notes.end(),
+                            [](const Note& a, const Note& b)
+                            { return a.time < b.time; });
+                    }
+                    LongStartPlaced = false;
+                }
             }
         }
-        //確認用
     }
 
 
