@@ -107,7 +107,7 @@ private:
     float musicTimeInBeats = 0.0f;
     float editorBeat = 0.0f;
     float LongStartTime = 0.0f;
-    float LongInterval = 0.125f;    //8•ª‰¹•„ŠÔŠu
+    float LongInterval = 0.1f;    //8•ª‰¹•„ŠÔŠu ‘ÌŠ´0.1‚ªˆê”Ô‚«‚ê‚¢‚É‚¨‚¯‚é
 
     float currentBeat = 0.0f;
 
