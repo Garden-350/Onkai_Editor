@@ -10,6 +10,7 @@
 #include <chrono>
 
 #include "sound.h"
+#include <memory>
 
 enum class BGMstate
 {
@@ -157,6 +158,8 @@ private:
 
     void CreateDeviceDependentResources();
     void CreateWindowSizeDependentResources();
+
+    float SnapToGrid(float time, float bpm, int division);
 
     // Device resources.
     std::unique_ptr<DX::DeviceResources>    m_deviceResources;

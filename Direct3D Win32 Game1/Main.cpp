@@ -116,7 +116,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 // Windows procedure
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))  // Å© í«â¡
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
         return true;
 
     static bool s_in_sizemove = false;

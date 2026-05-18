@@ -21,7 +21,7 @@ std::vector<Note> notes;
 std::vector<Beams> beams;
 
 std::vector<Note> originalNotes;
-static char filename[64] = "hhhhh";
+static char filename[64] = "chartname";
 NoteType currentNoteType = TAP;
 
 int lane;
@@ -99,7 +99,7 @@ void Game::Tick()
     ImGui::NewFrame();
 
     //  デモウィンドウの描画
-    ImGui::ShowDemoWindow();
+    //ImGui::ShowDemoWindow();
     m_timer.Tick([&]()
         {
             Update(m_timer);
@@ -132,12 +132,12 @@ void Game::Update(DX::StepTimer const& timer)
 
     float elapsedTime = float(timer.GetElapsedSeconds());
     //  新しいウィンドウの作成
-    ImGui::Begin("TestWindow");
-    {
-        //  テキストの表示
-        ImGui::Text("Hello, world!!");
-    }
-    ImGui::End();
+    //ImGui::Begin("TestWindow");
+    //{
+    //    //  テキストの表示
+    //    ImGui::Text("Hello, world!!");
+    //}
+    //ImGui::End();
     //ノーツを置いてもいいかの確認
     if (GetAsyncKeyState('Q') & 0x0001)
     {
@@ -156,7 +156,6 @@ void Game::Update(DX::StepTimer const& timer)
     {
         mirrorMode = false;
     }
-    // ImGuiのボタン群のあたりに追加
     ImGui::SliderFloat("Long Interval", &LongInterval, 0.03f, 0.5f);
     if (LongStartPlaced)
     {
@@ -193,7 +192,7 @@ void Game::Update(DX::StepTimer const& timer)
 
             float clickedBeat = currentBeat + (judgeLine - mouseY) / pixelsPerBeat;
             float clickedTime = clickedBeat * secondsPerBeat;
-
+            clickedTime = SnapToGrid(clickedTime, bpm, division);
             // ===== STARTノーツ =====
             if (mousePressed && currentNoteType == LONG_START)
             {
@@ -209,7 +208,7 @@ void Game::Update(DX::StepTimer const& timer)
                     //2クリック目　CENTER自動生成＋END配置
                     float startT = LongStartTime;
                     float endT = clickedTime;
-
+                    clickedTime = SnapToGrid(clickedTime, bpm, division);
                     if (endT > startT)
                     {
                         float t = startT + LongInterval;
@@ -719,7 +718,8 @@ void Game::Render()
     ImGui::SliderInt("Beam Lane", &beamLaneInput, 0, LANE_COUNT - 1);
     ImGui::InputFloat("Start Time", &beamStartInput, 0.1f);
     ImGui::InputFloat("End Time", &beamEndInput, 0.1f);
-    ImGui::InputFloat("Warning Offset", &beamWarningOffset, 0.1f);
+    ImGui::InputFloat("Warning Time", &beamWarningOffset, 0.1f);
+    ImGui::SliderInt("Division", &division, 1, 16);
 
     if (ImGui::Button("Add Beam"))
     {
@@ -923,7 +923,7 @@ void Game::NoteBorn()
     // currentBeat を使う（再生中はmusicTime換算、停止中はeditorBeat）
     float clickedBeat = currentBeat + (judgeLine - mouseY) / pixelsPerBeat;
     float clickedTime = clickedBeat * secondsPerBeat;
-
+    clickedTime = SnapToGrid(clickedTime, bpm, division);
     // ノーツ追加
     notes.push_back(Note(clickedLane, clickedTime, currentNoteType));
 
@@ -1960,6 +1960,14 @@ void Game::CreateDeviceDependentResources()
 void Game::CreateWindowSizeDependentResources()
 {
     // TODO: Initialize windows-size dependent objects here.
+}
+
+float Game::SnapToGrid(float time, float bpm, int division)
+{
+    float secondBeat = 60.0f / bpm;
+    float gridUnit = secondBeat / division; //1グリッドの秒数
+
+    return std::round(time / gridUnit) * gridUnit;
 }
 
 void Game::OnDeviceLost()
