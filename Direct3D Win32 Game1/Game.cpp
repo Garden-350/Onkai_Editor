@@ -378,357 +378,452 @@ void Game::Render()
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
 
-    ImGui::Begin("Editor",
-        nullptr,
-        ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoCollapse |
-        ImGuiWindowFlags_NoNav
-    );
+   // ImGui::Begin("Editor",
+   //     nullptr,
+   //     ImGuiWindowFlags_NoMove |
+   //     ImGuiWindowFlags_NoResize |
+   //     ImGuiWindowFlags_NoCollapse |
+   //     ImGuiWindowFlags_NoNav
+   // );
 
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    ImVec2 pos = ImGui::GetCursorScreenPos();
+   // ImDrawList* draw = ImGui::GetWindowDrawList();
+   // ImVec2 pos = ImGui::GetCursorScreenPos();
 
 
 
-    // レーン描画
-    for (int i = 0; i <= LANE_COUNT; i++)
+   // // レーン描画
+   // for (int i = 0; i <= LANE_COUNT; i++)
+   // {
+   //     float x = pos.x + laneStartX + laneWidth * i;
+
+   //     draw->AddLine(
+   //         ImVec2(x, pos.y),
+   //         ImVec2(x, pos.y + 600),
+   //         IM_COL32(255, 255, 255, 255),
+   //         2.0f
+   //     );
+   // }
+   // //ここで長さを変更
+   //// float gridHeight = -4000.0f;
+
+   // //グリッド
+   // bpm = 120;
+   // //ここをいじったら曲の速さ変わるよ
+   // float pixelsPerBeat = 100.0f;
+   // float secondsPerBeat = 60.0f / bpm;
+   // float musicBeat = musicTime / secondsPerBeat; // 今何拍目か
+   // if (bgmstate == BGMstate::play)
+   // {
+   //     currentBeat = musicTime / secondsPerBeat;
+   // }
+   // else
+   // {
+   //     currentBeat = editorBeat; // 手動スクロール用
+   // }
+   // for (int step = 0; step < totalSteps; step++)
+   // {
+   //     float timeStep = step * (1.0f / division); // 1拍をdivisionで分割
+   //     float lineY = pos.y + judgeLine - (timeStep - currentBeat) * pixelsPerBeat;
+   //     ImU32 color;
+   //     if (step % (beatsPerMeasure * division) == 0)
+   //         color = IM_COL32(255, 255, 255, 255);   //小節
+   //     else if (step % division == 0)
+   //         color = IM_COL32(200, 200, 200, 255);   //拍
+   //     else
+   //         color = IM_COL32(100, 100, 100, 255);   //16分
+
+   //     draw->AddLine(
+   //         ImVec2(pos.x + laneStartX, lineY),
+   //         ImVec2(pos.x + laneStartX + laneWidth * LANE_COUNT, lineY),
+   //         color
+   //     );
+
+   //     if (step % (beatsPerMeasure * division) == 0)
+   //     {
+   //         int meausureNow = step / (beatsPerMeasure * division) + 1;
+   //         draw->AddText
+   //         (ImVec2(pos.x + 5, lineY - 10),
+   //             IM_COL32(255, 255, 0, 255),
+   //             std::to_string(meausureNow).c_str()
+   //         );
+   //     }
+   // }
+
+   // //判定表示=============================================
+   // draw->AddText
+   // (ImVec2(pos.x + 700, pos.y + 150),
+   //     IM_COL32(255, 0, 255, 255),
+   //     std::to_string(success).c_str()
+   // );
+
+   // draw->AddText
+   // (ImVec2(pos.x + 700, pos.y + 200),
+   //     IM_COL32(20, 255, 255, 255),
+   //     std::to_string(miss).c_str()
+   // );
+   // //===================================================
+
+   // draw->AddLine(
+   //     ImVec2(pos.x + laneStartX, pos.y + judgeLine),
+   //     ImVec2(pos.x + laneStartX + laneWidth * LANE_COUNT, pos.y + judgeLine),
+   //     IM_COL32(255, 0, 0, 255),
+   //     4.0f
+   // );
+
+   // // ノーツ描画
+   // for (auto& note : notes)
+   // {
+   //     ID3D11ShaderResourceView* texture = nullptr;
+
+   //     switch (note.note)
+   //     {
+   //     case TAP:
+   //         texture = noteTap;
+   //         noteHeight = 20.0f;
+   //         break;
+
+   //     case LONG_START:
+   //         texture = noteLongStart;
+   //         noteHeight = 20.0f;
+   //         break;
+
+   //     case LONG_CENTER:
+   //         texture = noteLongCenter;
+   //         noteHeight = 20.0f;
+   //         break;
+
+   //     case LONG_END:
+   //         texture = noteLongEnd;
+   //         noteHeight = 20.0f;
+   //         break;
+
+   //     case UNTIMIRROR:
+   //         texture = noteUntiMirror;
+   //         noteHeight = 20.0f;
+   //         break;
+
+   //     case MIRRORNOTE:
+   //         texture = noteMirror;
+   //         noteHeight = 20.0f;
+   //         break;
+
+   //     case BEAM:
+   //         texture = Beam;
+   //         noteHeight = -300.0f;
+   //         break;
+
+   //     default:
+   //         texture = noteTap;
+   //         break;
+   //     }
+
+   //     //ここから下反転処理====================================================================================
+   //     int drawLane = note.lane;
+
+   //     if (mirrorMode && mirrorLane == 5 && note.note != UNTIMIRROR)
+   //     {
+   //         if (note.lane == 4)
+   //         {
+   //             drawLane = 5;
+   //         }
+   //         else if (note.lane == 5)
+   //         {
+   //             drawLane = 4;
+   //         }
+   //     }
+   //     if (mirrorMode && mirrorLane == 4 && note.note != UNTIMIRROR)
+   //     {
+   //         if (note.lane == 3)
+   //         {
+   //             drawLane = 4;
+   //         }
+   //         else if (note.lane == 4)
+   //         {
+   //             drawLane = 3;
+   //         }
+   //         if (note.lane == 2)
+   //         {
+   //             drawLane = 5;
+   //         }
+   //         else if (note.lane == 5)
+   //         {
+   //             drawLane = 2;
+   //         }
+   //     }
+   //     if (mirrorMode && mirrorLane == 3 && note.note != UNTIMIRROR)
+   //     {
+   //         if (note.lane == 0)
+   //         {
+   //             drawLane = 5;
+   //         }
+   //         else if (note.lane == 5)
+   //         {
+   //             drawLane = 0;
+   //         }
+   //         if (note.lane == 1)
+   //         {
+   //             drawLane = 4;
+   //         }
+   //         else if (note.lane == 4)
+   //         {
+   //             drawLane = 1;
+   //         }
+   //         if (note.lane == 2)
+   //         {
+   //             drawLane = 3;
+   //         }
+   //         else if (note.lane == 3)
+   //         {
+   //             drawLane = 2;
+   //         }
+   //     }
+   //     if (mirrorMode && mirrorLane == 2 && note.note != UNTIMIRROR)
+   //     {
+   //         if (note.lane == 0)
+   //         {
+   //             drawLane = 3;
+   //         }
+   //         else if (note.lane == 3)
+   //         {
+   //             drawLane = 0;
+   //         }
+   //         if (note.lane == 1)
+   //         {
+   //             drawLane = 2;
+   //         }
+   //         else if (note.lane == 2)
+   //         {
+   //             drawLane = 1;
+   //         }
+   //     }
+   //     if (mirrorMode && mirrorLane == 1 && note.note != UNTIMIRROR)
+   //     {
+   //         if (note.lane == 0)
+   //         {
+   //             drawLane = 1;
+   //         }
+   //         else if (note.lane == 1)
+   //         {
+   //             drawLane = 0;
+   //         }
+   //     }
+   //     //===============================================================================================
+   //     float x = pos.x + laneStartX + drawLane * laneWidth;
+   //     float noteBeat = note.time / secondsPerBeat;
+   //     float y = pos.y + judgeLine - (noteBeat - currentBeat) * pixelsPerBeat;
+   //     draw->AddImage(
+   //         texture,
+   //         ImVec2(x, y),
+   //         //ここでノーツごとの大きさを固定化
+   //         ImVec2(x + laneWidth, y + noteHeight)
+   //     );
+   // }
+
+   // // ビーム描画
+   // for (const auto& beam : beams)
+   // {
+   //     float currentTime = musicTime; // 現在の再生時刻
+
+   //     // まだ予告も始まってない
+   //     if (currentTime < beam.warningTime) continue;
+
+   //     // 終了済み
+   //     if (currentTime > beam.endTime) continue;
+
+   //     float x = pos.x + laneStartX + beam.lane * laneWidth;
+   //     float beamTop = pos.y;      // 画面上端
+   //     float beamBottom = pos.y + 600; // 画面下端（レーンの長さ）
+
+   //     if (currentTime >= beam.startTime && currentTime <= beam.endTime)
+   //     {
+   //         // 本ビーム（赤など目立つ色）
+   //         draw->AddRectFilled(
+   //             ImVec2(x, beamTop),
+   //             ImVec2(x + laneWidth, beamBottom),
+   //             IM_COL32(255, 0, 0, 180)
+   //         );
+   //     }
+   //     else if (currentTime >= beam.warningTime && currentTime < beam.startTime)
+   //     {
+   //         // 予告線（薄い色や点線風）
+   //         draw->AddRectFilled(
+   //             ImVec2(x, beamTop),
+   //             ImVec2(x + laneWidth, beamBottom),
+   //             IM_COL32(255, 255, 0, 80)
+   //         );
+   //     }
+   // }
+
+
+   // float mirrorX = pos.x + laneStartX + mirrorLane * laneWidth;
+
+   // draw->AddLine(
+   //     ImVec2(mirrorX, pos.y),
+   //     ImVec2(mirrorX, pos.y + 600),
+   //     IM_COL32(255, 0, 0, 255),
+   //     3.0f
+   // );
+
+   // //ImGui::SetCursorPos(ImVec2(0, 500));
+   // ImGui::Text("Note Type");
+   // if (ImGui::Button("TAP") || GetAsyncKeyState('1') & 0x0001)
+   // {
+   //     currentNoteType = TAP;
+   // }
+   // ImGui::SameLine();
+
+   // if (ImGui::Button("Long") || GetAsyncKeyState('2') & 0x0001)
+   // {
+   //     currentNoteType = LONG_START;
+   // }
+
+   // ImGui::SameLine();
+
+   // if (ImGui::Button("AntiMirror") || GetAsyncKeyState('3') & 0x0001)
+   // {
+   //     currentNoteType = UNTIMIRROR;
+   // }
+   // ImGui::SameLine();
+
+   // if (ImGui::Button("MirrorNote") || GetAsyncKeyState('4') & 0x0001)
+   // {
+   //     currentNoteType = MIRRORNOTE;
+   // }
+
+   // if (ImGui::Button("Beam") || GetAsyncKeyState('5') & 0x0001)
+   // {
+   //     currentNoteType = BEAM;
+   // }
+   // //ImGui::SameLine();
+
+   // ImGui::InputText("Filename", filename, 64);
+   // if (ImGui::Button("Save"))
+   // {
+   //     //保存前にmirrorModeがtrueの場合falseに戻します
+   //     if (mirrorMode) mirrorMode = false;
+   //     SaveChart(filename);
+   // }
+   // if (ImGui::Button("Load"))
+   // {
+   //     LoadChart(filename);
+   // }
+
+   // static float beamStartInput = 0.0f;
+   // static float beamEndInput = 1.0f;
+   // static float beamWarningOffset = 0.5f; // startTimeより何秒前に予告を出すか
+   // static int beamLaneInput = 0;
+
+   // ImGui::Separator();
+   // ImGui::Text("Beam Settings");
+   // ImGui::SliderInt("Beam Lane", &beamLaneInput, 0, LANE_COUNT - 1);
+   // ImGui::InputFloat("Start Time", &beamStartInput, 0.1f);
+   // ImGui::InputFloat("End Time", &beamEndInput, 0.1f);
+   // ImGui::InputFloat("Warning Time", &beamWarningOffset, 0.1f);
+   // ImGui::SliderInt("Division", &division, 1, 16);
+
+   // if (ImGui::Button("Add Beam"))
+   // {
+   //     float warningTime = beamStartInput - beamWarningOffset;
+   //     if (warningTime < 0) warningTime = 0;
+   //     beams.push_back(Beams(beamLaneInput, beamStartInput, beamEndInput, warningTime));
+   // }
+
+
+   // ImGui::End();
+
+    float screenW = ImGui::GetIO().DisplaySize.x;
+    float screenH = ImGui::GetIO().DisplaySize.y;
+    float leftW = 200.0f;
+    float bottomH = 60.0f;
+
+    //左
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(leftW, screenH - bottomH));
+    ImGui::Begin("LeftPanel", nullptr,
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
+    //左パネル======================================================
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(200, screenH - bottomH));
+    ImGui::Begin("LeftPanel", nullptr,
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
+
+    //ノーツの種類==================================================
+    ImGui::SeparatorText("Note Type");
+
+    //選択中のノーツを色付き表示
+    const char* noteNames[] = { "TAP","LONG","antiMirror","MirrorNote","Beam" };
+    NoteType noteTypes[] = { TAP, LONG_START, UNTIMIRROR, MIRRORNOTE, BEAM };
+
+    for (int i = 0; i < 5; i++)
     {
-        float x = pos.x + laneStartX + laneWidth * i;
+        bool selected = (currentNoteType == noteTypes[i]);
+        if (selected) 
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 1.0f, 1.0f));   //色変更
+        
+        if (ImGui::Button(noteNames[i], ImVec2(-1, 0)))    //幅まで広げる場所
+        currentNoteType = noteTypes[i];
 
-        draw->AddLine(
-            ImVec2(x, pos.y),
-            ImVec2(x, pos.y + 600),
-            IM_COL32(255, 255, 255, 255),
-            2.0f
-        );
+        if (selected) 
+            ImGui::PopStyleColor();
     }
-    //ここで長さを変更
-   // float gridHeight = -4000.0f;
-
-    //グリッド
-    bpm = 120;
-    //ここをいじったら曲の速さ変わるよ
-    float pixelsPerBeat = 100.0f;
-    float secondsPerBeat = 60.0f / bpm;
-    float musicBeat = musicTime / secondsPerBeat; // 今何拍目か
-    if (bgmstate == BGMstate::play)
-    {
-        currentBeat = musicTime / secondsPerBeat;
-    }
-    else
-    {
-        currentBeat = editorBeat; // 手動スクロール用
-    }
-    for (int step = 0; step < totalSteps; step++)
-    {
-        float timeStep = step * (1.0f / division); // 1拍をdivisionで分割
-        float lineY = pos.y + judgeLine - (timeStep - currentBeat) * pixelsPerBeat;
-        ImU32 color;
-        if (step % (beatsPerMeasure * division) == 0)
-            color = IM_COL32(255, 255, 255, 255);   //小節
-        else if (step % division == 0)
-            color = IM_COL32(200, 200, 200, 255);   //拍
-        else
-            color = IM_COL32(100, 100, 100, 255);   //16分
-
-        draw->AddLine(
-            ImVec2(pos.x + laneStartX, lineY),
-            ImVec2(pos.x + laneStartX + laneWidth * LANE_COUNT, lineY),
-            color
-        );
-
-        if (step % (beatsPerMeasure * division) == 0)
-        {
-            int meausureNow = step / (beatsPerMeasure * division) + 1;
-            draw->AddText
-            (ImVec2(pos.x + 5, lineY - 10),
-                IM_COL32(255, 255, 0, 255),
-                std::to_string(meausureNow).c_str()
-            );
-        }
-    }
-
-    //判定表示=============================================
-    draw->AddText
-    (ImVec2(pos.x + 700, pos.y + 150),
-        IM_COL32(255, 0, 255, 255),
-        std::to_string(success).c_str()
-    );
-
-    draw->AddText
-    (ImVec2(pos.x + 700, pos.y + 200),
-        IM_COL32(20, 255, 255, 255),
-        std::to_string(miss).c_str()
-    );
-    //===================================================
-
-    draw->AddLine(
-        ImVec2(pos.x + laneStartX, pos.y + judgeLine),
-        ImVec2(pos.x + laneStartX + laneWidth * LANE_COUNT, pos.y + judgeLine),
-        IM_COL32(255, 0, 0, 255),
-        4.0f
-    );
-
-    // ノーツ描画
-    for (auto& note : notes)
-    {
-        ID3D11ShaderResourceView* texture = nullptr;
-
-        switch (note.note)
-        {
-        case TAP:
-            texture = noteTap;
-            noteHeight = 20.0f;
-            break;
-
-        case LONG_START:
-            texture = noteLongStart;
-            noteHeight = 20.0f;
-            break;
-
-        case LONG_CENTER:
-            texture = noteLongCenter;
-            noteHeight = 20.0f;
-            break;
-
-        case LONG_END:
-            texture = noteLongEnd;
-            noteHeight = 20.0f;
-            break;
-
-        case UNTIMIRROR:
-            texture = noteUntiMirror;
-            noteHeight = 20.0f;
-            break;
-
-        case MIRRORNOTE:
-            texture = noteMirror;
-            noteHeight = 20.0f;
-            break;
-
-        case BEAM:
-            texture = Beam;
-            noteHeight = -300.0f;
-            break;
-
-        default:
-            texture = noteTap;
-            break;
-        }
-
-        //ここから下反転処理====================================================================================
-        int drawLane = note.lane;
-
-        if (mirrorMode && mirrorLane == 5 && note.note != UNTIMIRROR)
-        {
-            if (note.lane == 4)
-            {
-                drawLane = 5;
-            }
-            else if (note.lane == 5)
-            {
-                drawLane = 4;
-            }
-        }
-        if (mirrorMode && mirrorLane == 4 && note.note != UNTIMIRROR)
-        {
-            if (note.lane == 3)
-            {
-                drawLane = 4;
-            }
-            else if (note.lane == 4)
-            {
-                drawLane = 3;
-            }
-            if (note.lane == 2)
-            {
-                drawLane = 5;
-            }
-            else if (note.lane == 5)
-            {
-                drawLane = 2;
-            }
-        }
-        if (mirrorMode && mirrorLane == 3 && note.note != UNTIMIRROR)
-        {
-            if (note.lane == 0)
-            {
-                drawLane = 5;
-            }
-            else if (note.lane == 5)
-            {
-                drawLane = 0;
-            }
-            if (note.lane == 1)
-            {
-                drawLane = 4;
-            }
-            else if (note.lane == 4)
-            {
-                drawLane = 1;
-            }
-            if (note.lane == 2)
-            {
-                drawLane = 3;
-            }
-            else if (note.lane == 3)
-            {
-                drawLane = 2;
-            }
-        }
-        if (mirrorMode && mirrorLane == 2 && note.note != UNTIMIRROR)
-        {
-            if (note.lane == 0)
-            {
-                drawLane = 3;
-            }
-            else if (note.lane == 3)
-            {
-                drawLane = 0;
-            }
-            if (note.lane == 1)
-            {
-                drawLane = 2;
-            }
-            else if (note.lane == 2)
-            {
-                drawLane = 1;
-            }
-        }
-        if (mirrorMode && mirrorLane == 1 && note.note != UNTIMIRROR)
-        {
-            if (note.lane == 0)
-            {
-                drawLane = 1;
-            }
-            else if (note.lane == 1)
-            {
-                drawLane = 0;
-            }
-        }
-        //===============================================================================================
-        float x = pos.x + laneStartX + drawLane * laneWidth;
-        float noteBeat = note.time / secondsPerBeat;
-        float y = pos.y + judgeLine - (noteBeat - currentBeat) * pixelsPerBeat;
-        draw->AddImage(
-            texture,
-            ImVec2(x, y),
-            //ここでノーツごとの大きさを固定化
-            ImVec2(x + laneWidth, y + noteHeight)
-        );
-    }
-
-    // ビーム描画
-    for (const auto& beam : beams)
-    {
-        float currentTime = musicTime; // 現在の再生時刻
-
-        // まだ予告も始まってない
-        if (currentTime < beam.warningTime) continue;
-
-        // 終了済み
-        if (currentTime > beam.endTime) continue;
-
-        float x = pos.x + laneStartX + beam.lane * laneWidth;
-        float beamTop = pos.y;      // 画面上端
-        float beamBottom = pos.y + 600; // 画面下端（レーンの長さ）
-
-        if (currentTime >= beam.startTime && currentTime <= beam.endTime)
-        {
-            // 本ビーム（赤など目立つ色）
-            draw->AddRectFilled(
-                ImVec2(x, beamTop),
-                ImVec2(x + laneWidth, beamBottom),
-                IM_COL32(255, 0, 0, 180)
-            );
-        }
-        else if (currentTime >= beam.warningTime && currentTime < beam.startTime)
-        {
-            // 予告線（薄い色や点線風）
-            draw->AddRectFilled(
-                ImVec2(x, beamTop),
-                ImVec2(x + laneWidth, beamBottom),
-                IM_COL32(255, 255, 0, 80)
-            );
-        }
-    }
-
-
-    float mirrorX = pos.x + laneStartX + mirrorLane * laneWidth;
-
-    draw->AddLine(
-        ImVec2(mirrorX, pos.y),
-        ImVec2(mirrorX, pos.y + 600),
-        IM_COL32(255, 0, 0, 255),
-        3.0f
-    );
-
-    //ImGui::SetCursorPos(ImVec2(0, 500));
-    ImGui::Text("Note Type");
-    if (ImGui::Button("TAP") || GetAsyncKeyState('1') & 0x0001)
-    {
-        currentNoteType = TAP;
-    }
-    ImGui::SameLine();
-
-    if (ImGui::Button("Long") || GetAsyncKeyState('2') & 0x0001)
-    {
-        currentNoteType = LONG_START;
-    }
-
-    ImGui::SameLine();
-
-    if (ImGui::Button("AntiMirror") || GetAsyncKeyState('3') & 0x0001)
-    {
-        currentNoteType = UNTIMIRROR;
-    }
-    ImGui::SameLine();
-
-    if (ImGui::Button("MirrorNote") || GetAsyncKeyState('4') & 0x0001)
-    {
-        currentNoteType = MIRRORNOTE;
-    }
-
-    if (ImGui::Button("Beam") || GetAsyncKeyState('5') & 0x0001)
-    {
-        currentNoteType = BEAM;
-    }
-    //ImGui::SameLine();
-
-    ImGui::InputText("Filename", filename, 64);
-    if (ImGui::Button("Save"))
-    {
-        //保存前にmirrorModeがtrueの場合falseに戻します
-        if (mirrorMode) mirrorMode = false;
-        SaveChart(filename);
-    }
-    if (ImGui::Button("Load"))
-    {
-        LoadChart(filename);
-    }
-
-    static float beamStartInput = 0.0f;
-    static float beamEndInput = 1.0f;
-    static float beamWarningOffset = 0.5f; // startTimeより何秒前に予告を出すか
-    static int beamLaneInput = 0;
-
-    ImGui::Separator();
-    ImGui::Text("Beam Settings");
-    ImGui::SliderInt("Beam Lane", &beamLaneInput, 0, LANE_COUNT - 1);
-    ImGui::InputFloat("Start Time", &beamStartInput, 0.1f);
-    ImGui::InputFloat("End Time", &beamEndInput, 0.1f);
-    ImGui::InputFloat("Warning Time", &beamWarningOffset, 0.1f);
+    //グリッド設定(1小説にどれだけ細かくノーツを置けるかの設定)
+    ImGui::SeparatorText("Grid");
     ImGui::SliderInt("Division", &division, 1, 16);
+    //ビーム設定
+    ImGui::SeparatorText("Beam");
+    static float beamStartInput = 0.0f;     //ビーム開始時間
+    static float beamEndInput = 1.0f;       //ビーム終わり時間
+    static float beamWarningOffset = 0.5f;  //ビーム発射前の忠告線が何秒前から出るか
+    static int beamLaneInput = 0;           //ビームを出すレーン
 
-    if (ImGui::Button("Add Beam"))
+    ImGui::SliderInt("Lane##beam", &beamLaneInput, 0, LANE_COUNT - 1);
+    ImGui::InputFloat("Start##beam", &beamStartInput, 0.1f);
+    ImGui::InputFloat("End##beam", &beamEndInput, 0.1f);
+    ImGui::InputFloat("Warning##beam", &beamWarningOffset, 0.1f);
+
+    if (ImGui::Button("Add Beam", ImVec2(-1, 0)))
     {
         float warningTime = beamStartInput - beamWarningOffset;
+        //もし発車時間よりも忠告線の方が速いもしくは差が0なら忠告時間を0に変更
         if (warningTime < 0) warningTime = 0;
         beams.push_back(Beams(beamLaneInput, beamStartInput, beamEndInput, warningTime));
     }
+    //ファイル保存=============================================
+    ImGui::SeparatorText("Fire");
+    ImGui::InputText("##filename", filename, 64);   //##をつけることでfilenameを消す
+    if (ImGui::Button("Save", ImVec2(90, 0)));
+    {
+        //もし保存時にミラーモードがONならOFFに切り替えて保存
+        if (mirrorMode) mirrorMode = false;
+        SaveChart(filename);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Load", ImVec2(90, 0)))
+    {
+        //ファイル読み込み
+        LoadChart(filename);
+    }
+    ImGui::End();
+    ImGui::End();
+    //譜面エリア
+    ImGui::SetNextWindowPos(ImVec2(leftW, 0));
+    ImGui::SetNextWindowSize(ImVec2(screenW - leftW, screenH - bottomH));
+    ImGui::Begin("Editor", nullptr,
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
+    //draw->AddLineとか
+    ImGui::End();
 
-
+    //下のバー
+    ImGui::SetNextWindowPos(ImVec2(0, screenH - bottomH));
+    ImGui::SetNextWindowSize(ImVec2(screenW, bottomH));
+    ImGui::Begin("BottomBar", nullptr,
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar
+    );
+    // 再生・停止・もどるボタン、時間表示
     ImGui::End();
 
     context;
