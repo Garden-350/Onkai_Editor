@@ -109,7 +109,7 @@ private:
     float editorBeat = 0.0f;
     float LongStartTime = 0.0f;
     float LongInterval = 0.1f;    //8•ª‰¹•„ŠÔŠu ‘ÌŠ´0.1‚ªˆê”Ô‚«‚ê‚¢‚É‚¨‚¯‚é
-
+    float chartPosX = 0.0f;
     float currentBeat = 0.0f;
 
     int center = 0;
