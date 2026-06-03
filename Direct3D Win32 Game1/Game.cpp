@@ -168,7 +168,7 @@ void Game::Update(DX::StepTimer const& timer)
         {
             if (lane >= 0 && lane < LANE_COUNT)
             {
-                NoteBorn();
+               NoteBorn();
             }
         }
         if (lane >= 0 && lane < LANE_COUNT)
@@ -196,34 +196,37 @@ void Game::Update(DX::StepTimer const& timer)
             // ===== STARTノーツ =====
             if (mousePressed && currentNoteType == LONG_START)
             {
-                if (!LongStartPlaced)
+                if (!isOutRange)
                 {
-                    notes.push_back(Note(clickedLane, clickedTime, LONG_START));
-                    LongStartPlaced = true;
-                    LongStartLane = clickedLane;
-                    LongStartTime = clickedTime;
-                }
-                else
-                {
-                    //2クリック目　CENTER自動生成＋END配置
-                    float startT = LongStartTime;
-                    float endT = clickedTime;
-                    clickedTime = SnapToGrid(clickedTime, bpm, division);
-                    if (endT > startT)
+                    if (!LongStartPlaced)
                     {
-                        float t = startT + LongInterval;
-                        while (t < endT - LongInterval * 0.5f)
-                        {
-                            notes.push_back(Note(LongStartLane, t, LONG_CENTER));
-                            t += LongInterval;
-                        }
-                        notes.push_back(Note(LongStartLane, endT, LONG_END));
-
-                        std::sort(notes.begin(), notes.end(),
-                            [](const Note& a, const Note& b)
-                            { return a.time < b.time; });
+                        notes.push_back(Note(clickedLane, clickedTime, LONG_START));
+                        LongStartPlaced = true;
+                        LongStartLane = clickedLane;
+                        LongStartTime = clickedTime;
                     }
-                    LongStartPlaced = false;
+                    else
+                    {
+                        //2クリック目　CENTER自動生成＋END配置
+                        float startT = LongStartTime;
+                        float endT = clickedTime;
+                        clickedTime = SnapToGrid(clickedTime, bpm, division);
+                        if (endT > startT)
+                        {
+                            float t = startT + LongInterval;
+                            while (t < endT - LongInterval * 0.5f)
+                            {
+                                notes.push_back(Note(LongStartLane, t, LONG_CENTER));
+                                t += LongInterval;
+                            }
+                            notes.push_back(Note(LongStartLane, endT, LONG_END));
+
+                            std::sort(notes.begin(), notes.end(),
+                                [](const Note& a, const Note& b)
+                                { return a.time < b.time; });
+                        }
+                        LongStartPlaced = false;
+                    }
                 }
             }
         }
@@ -432,7 +435,7 @@ void Game::Render()
         if (ImGui::Button("Add Beam", ImVec2(-1, 0)))
         {
             float warningTime = beamStartInput - beamWarningOffset;
-            //もし発車時間よりも忠告線の方が速いもしくは差が0なら忠告時間を0に変更
+            //もし発射時間よりも忠告線の方が速いもしくは差が0なら忠告時間を0に変更
             if (warningTime < 0) warningTime = 0;
             beams.push_back(Beams(beamLaneInput, beamStartInput, beamEndInput, warningTime));
         }
@@ -455,6 +458,10 @@ void Game::Render()
     }
     //譜面エリア=====================================================
     {
+        POINT p;
+        GetCursorPos(&p);
+        ScreenToClient(GetActiveWindow(), &p);
+
         ImGui::SetNextWindowPos(ImVec2(leftW, 0));
         ImGui::SetNextWindowSize(ImVec2(chartW, chartH));
         ImGui::Begin("Editor", nullptr,
@@ -462,6 +469,16 @@ void Game::Render()
             ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
         ImDrawList* draw = ImGui::GetWindowDrawList();
         ImVec2 pos = ImGui::GetCursorScreenPos();
+
+        if (p.x >= leftW && p.x <= leftW + chartW &&
+             p.y >= 0 && p.y <= chartH)
+        {
+            isOutRange = false;
+        }
+        else
+        {
+            isOutRange = true;
+        }
 
         //BPM・拍計算
         bpm = 120;      //仮で決めてるだけです！曲によって変えてください！
@@ -821,29 +838,33 @@ void Game::NoteBorn()
     GetCursorPos(&p);
     ScreenToClient(GetActiveWindow(), &p);
 
-    float mouseX = (float)p.x;
-    float mouseY = (float)p.y - 30.0f;
+    if (!isOutRange)
+    {
+        float mouseX = (float)p.x;
+        float mouseY = (float)p.y - 30.0f;
 
-    // クリック位置からレーンを計算
-    int clickedLane = (int)((mouseX - chartPosX - laneStartX) / laneWidth);
-    if (clickedLane < 0)
-        clickedLane = 0;
-    else if (clickedLane >= LANE_COUNT)
-        clickedLane = LANE_COUNT - 1;
+        // クリック位置からレーンを計算
+        int clickedLane = (int)((mouseX - chartPosX - laneStartX) / laneWidth);
+        if (clickedLane < 0)
+            clickedLane = 0;
+        else if (clickedLane >= LANE_COUNT)
+            clickedLane = LANE_COUNT - 1;
 
-    // BPM情報
-    float secondsPerBeat = 60.0f / bpm;
+        // BPM情報
+        float secondsPerBeat = 60.0f / bpm;
 
-    // pixelsPerBeat はグリッドの1拍の高さ
-    float pixelsPerBeat = 100.0f;
+        // pixelsPerBeat はグリッドの1拍の高さ
+        float pixelsPerBeat = 100.0f;
 
 
-    // currentBeat を使う（再生中はmusicTime換算、停止中はeditorBeat）
-    float clickedBeat = currentBeat + (judgeLine - mouseY) / pixelsPerBeat;
-    float clickedTime = clickedBeat * secondsPerBeat;
-    clickedTime = SnapToGrid(clickedTime, bpm, division);
-    // ノーツ追加
-    notes.push_back(Note(clickedLane, clickedTime, currentNoteType));
+        // currentBeat を使う（再生中はmusicTime換算、停止中はeditorBeat）
+        float clickedBeat = currentBeat + (judgeLine - mouseY) / pixelsPerBeat;
+        float clickedTime = clickedBeat * secondsPerBeat;
+        clickedTime = SnapToGrid(clickedTime, bpm, division);
+        // ノーツ追加
+        notes.push_back(Note(clickedLane, clickedTime, currentNoteType));
+    }
+
 
 }
 

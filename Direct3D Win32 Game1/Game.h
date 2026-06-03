@@ -133,6 +133,7 @@ private:
     bool oknort = false;
     bool KeySpacePrev = false;
     bool LongStartPlaced = false;   //ロングノーツの最初判定(置くとき)
+    bool isOutRange = false;        //譜面エリアから出てたら置けなくするbool
 
     BGMstate bgmstate = BGMstate::stop;
 
