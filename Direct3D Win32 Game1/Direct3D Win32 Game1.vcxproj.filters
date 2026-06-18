@@ -50,6 +50,9 @@
     </ClInclude>
     <ClInclude Include="Note.h" />
     <ClInclude Include="sound.h" />
+    <ClInclude Include="json.hpp">
+      <Filter>Assets</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp" />

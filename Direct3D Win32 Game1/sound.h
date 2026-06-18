@@ -65,6 +65,9 @@ public:
 	// 引数で指定したサウンドの再生を再開する
 	void Resume(SOUND_LABEL label);
 
+	void SetPlayPositionSeconds(SOUND_LABEL label, float seconds);
+	void SeekSeconds(SOUND_LABEL label, float seconds);
+
 	void SetVolume(SOUND_LABEL label, float volume);
 
 };

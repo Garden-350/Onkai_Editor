@@ -291,6 +291,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     return DefWindowProc(hWnd, message, wParam, lParam);
 }
 
+BOOL InitInstance(HINSTANCE, int)
+{
+    return 0;
+}
+
 // Exit helper
 void ExitGame() noexcept
 {

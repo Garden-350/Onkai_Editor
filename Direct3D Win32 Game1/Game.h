@@ -1,4 +1,4 @@
-//
+ï»¿//
 // Game.h
 //
 
@@ -7,7 +7,13 @@
 #include "DeviceResources.h"
 #include "StepTimer.h"
 #include "Note.h"
+#include "json.hpp"
+#include "imgui.h"
 #include <chrono>
+#include <PrimitiveBatch.h>
+#include <VertexTypes.h>
+#include <Effects.h>
+#include <CommonStates.h>
 
 #include "sound.h"
 #include <memory>
@@ -19,17 +25,26 @@ enum class BGMstate
     pause
 };
 
+enum class EditorState
+{
+    IDLE,
+    PLACING_SPAWN,
+    PLACING_JUDGE,
+    EDITING,
+};
+
 struct Beams {
-    int lane;           // ‚Ç‚ÌƒŒ[ƒ“‚Éo‚é‚©
+    int lane;
     float time;
-    float startTime;    // ƒr[ƒ€‚ªn‚Ü‚éi•bj
-    float endTime;      // ƒr[ƒ€‚ªI‚í‚éi•bj
-    float warningTime;  // —\ü‚ªon‚ß‚éistartTime‚æ‚è‘Oj
+    float startTime;
+    float endTime;
+    float warningTime;
 
     Beams(int l, float start, float end, float warning)
         : lane(l), startTime(start), endTime(end), warningTime(warning) {
     }
 };
+
 
 // A basic game implementation that creates a D3D11 device and
 // provides a game loop.
@@ -93,12 +108,23 @@ private:
     std::string name;
     std::chrono::steady_clock::time_point musicStartTime;
 
+    std::unique_ptr<DirectX::PrimitiveBatch<DirectX::VertexPositionColor>> m_primitiveBatch;
+    std::unique_ptr<DirectX::BasicEffect> m_basicEffect;
+    std::unique_ptr<DirectX::CommonStates> m_states;
+    Microsoft::WRL::ComPtr<ID3D11InputLayout> m_inputLayout;
+
+    DirectX::SimpleMath::Vector3 worldPos;
+    DirectX::SimpleMath::Vector3 rayDir = {};
+
+    DirectX::SimpleMath::Matrix m_view; //ã‚«ãƒ¡ãƒ©ã®å‘ã
+    DirectX::SimpleMath::Matrix m_proj; //2Då¤‰æ›
+
     const int LANE_COUNT = 6;
-    int measure = 80;           //‹È‚Ì¬ß”B’²®•K{
+    int measure = 80;
     float laneWidth = 100.0f;
     float laneStartX = 50.0f;
     float noteHeight = 20.0f;
-    float beatHeight = 80.0f;   // 1”‚Ì‚‚³
+    float beatHeight = 80.0f;
     float scroll = 0.0f;
     float playSpeed = 300.0f;
     float judgeLine = 500.0f;
@@ -108,20 +134,23 @@ private:
     float musicTimeInBeats = 0.0f;
     float editorBeat = 0.0f;
     float LongStartTime = 0.0f;
-    float LongInterval = 0.1f;    //8•ª‰¹•„ŠÔŠu ‘ÌŠ´0.1‚ªˆê”Ô‚«‚ê‚¢‚É‚¨‚¯‚é
+    float LongInterval = 0.1f;
     float chartPosX = 0.0f;
     float currentBeat = 0.0f;
 
+    DirectX::SimpleMath::Vector3 cameraPos = { 0.0f, 800.0f, -200.0f };
+
     int center = 0;
     int totalBeat = 1000;
-    int beatsPerMeasure = 4;    // 1¬ß‚Ì”
-    int division = 4;           // ”‚Ì•ªŠ„(16•ª)
-    int mirrorLane = 3;         //‰Šúƒ~ƒ‰[”z’u
+    int beatsPerMeasure = 4;
+    int division = 4;
+    int mirrorLane = 3;
     int totalSteps = totalBeat * division;
-    int success = 0;            //”»’è‚ÌƒJƒEƒ“ƒg
-    int miss = 0;               //ƒ~ƒX‚ÌƒJƒEƒ“ƒg
-    int bpm;
+    int success = 0;
+    int miss = 0;
+    int bpm = 120;
     int LongStartLane = 0;
+    int selectedNoteIndex = -1;
 
     bool fastLong = false;
     bool fastTime = false;
@@ -132,8 +161,8 @@ private:
     bool isLong = false;
     bool oknort = false;
     bool KeySpacePrev = false;
-    bool LongStartPlaced = false;   //ƒƒ“ƒOƒm[ƒc‚ÌÅ‰”»’è(’u‚­‚Æ‚«)
-    bool isOutRange = false;        //•ˆ–ÊƒGƒŠƒA‚©‚ço‚Ä‚½‚ç’u‚¯‚È‚­‚·‚ébool
+    bool LongStartPlaced = false;
+    bool isOutRange = false;
 
     BGMstate bgmstate = BGMstate::stop;
 
@@ -165,6 +194,17 @@ private:
     // Device resources.
     std::unique_ptr<DX::DeviceResources>    m_deviceResources;
 
+    EditorState m_EditorState = EditorState::IDLE;
+    Note m_TempNote;
+
+    float m_ChartW = 0.0f;
+    float m_ChartH = 0.0f;
+
+    // 3D Path Preview ãƒŸãƒ‹æ ï¼ˆRender()ã§ç®—å‡ºã—ã€Update()ã®ã‚¯ãƒªãƒƒã‚¯åˆ¤å®šã§ä½¿ã†ï¼‰
+    ImVec2 m_PreviewMin = { 0.0f, 0.0f };
+    ImVec2 m_PreviewMax = { 0.0f, 0.0f };
+    ImVec2 m_PreviewCenter = { 0.0f, 0.0f };
+    bool m_PreviewValid = false; // Render()ã§ä¸€åº¦è¨ˆç®—ã•ã‚ŒãŸã‹ã©ã†ã‹
 
     // Rendering loop timer.
     DX::StepTimer                           m_timer;

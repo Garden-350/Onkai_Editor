@@ -182,8 +182,31 @@ void Sound::Resume(SOUND_LABEL label)
 }
 
 //=============================================================================
-// âπó ïœçX
+// çƒê∂à íuïœçX
 //=============================================================================
+void Sound::SetPlayPositionSeconds(SOUND_LABEL label, float seconds)
+{
+	if (seconds < 0.0f) seconds = 0.0f;
+
+	const int index = (int)label;
+	const UINT32 sampleRate = m_wfx[index].Format.nSamplesPerSec;
+	const UINT32 blockAlign = m_wfx[index].Format.nBlockAlign;
+	const UINT32 totalSamples = blockAlign > 0 ? m_buffer[index].AudioBytes / blockAlign : 0;
+
+	UINT32 sample = (UINT32)(seconds * sampleRate);
+	if (totalSamples > 0 && sample >= totalSamples)
+	{
+		sample = totalSamples - 1;
+	}
+
+	m_playPos[index] = sample;
+}
+
+void Sound::SeekSeconds(SOUND_LABEL label, float seconds)
+{
+	SetPlayPositionSeconds(label, seconds);
+	Play(label);
+}
 void Sound::SetVolume(SOUND_LABEL label, float volume)
 {
 	if (m_pSourceVoice[(int)label] == nullptr) return;
