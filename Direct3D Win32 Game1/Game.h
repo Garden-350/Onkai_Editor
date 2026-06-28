@@ -45,6 +45,42 @@ struct Beams {
     }
 };
 
+struct JudggeCircleframe {
+    float time; //いつ
+    float x;    //どこにいるか
+    float y;
+};
+
+struct JudggeCircle {
+    int lane = 0;
+    float fixedZ = -210.0f;
+    std::vector<JudggeCircleframe> keyframe;
+    ID3D11ShaderResourceView* texture = nullptr;
+
+    DirectX::SimpleMath::Vector3 GetPosition(float t) const
+    {
+        if (keyframe.empty()) return { 0.0f,-55.0f,fixedZ };
+        if (t <= keyframe.front().time) return { keyframe.front().x,keyframe.front().y,fixedZ };
+        if (t >= keyframe.back().time) return { keyframe.back().x,keyframe.back().y,fixedZ };
+
+        for (int i = 0; i + 1 < (int)keyframe.size(); i++)
+        {
+            const auto& a = keyframe[i];
+            const auto& b = keyframe[i + 1];
+            if (t >= a.time && t <= b.time)
+            {
+                float ratio = (t - a.time) / (b.time - a.time);
+                return{
+                    a.x + (b.x - a.x) * ratio,
+                    a.y + (b.y - a.y) * ratio,
+                    fixedZ
+                };
+            }
+        }
+        return { keyframe.back().x, keyframe.back().y, fixedZ };
+    }
+};
+
 
 // A basic game implementation that creates a D3D11 device and
 // provides a game loop.
@@ -111,6 +147,8 @@ private:
     std::unique_ptr<DirectX::PrimitiveBatch<DirectX::VertexPositionColor>> m_primitiveBatch;
     std::unique_ptr<DirectX::BasicEffect> m_basicEffect;
     std::unique_ptr<DirectX::CommonStates> m_states;
+    std::unique_ptr<DirectX::Model> m_noteModel;
+    std::unique_ptr<DirectX::IEffectFactory> m_fxFactory;
     Microsoft::WRL::ComPtr<ID3D11InputLayout> m_inputLayout;
 
     DirectX::SimpleMath::Vector3 worldPos;
@@ -169,8 +207,14 @@ private:
     bool mouseDown = GetAsyncKeyState(VK_LBUTTON) & 0x8000;
     bool mousePressed = GetAsyncKeyState(VK_LBUTTON) & 0x0001;
     bool longStart = false;
+    bool sideViewMode = false;
     float noteTime;
     float breakTime = -100.0f;
+
+    float highSpeed = 0.1f;
+    static constexpr float kHighSpeedMin = 0.25f;
+    static constexpr float kHighSpeedMax = 10.0f;
+    static constexpr float kHighSpeedStep = 0.25f;
 
     ID3D11ShaderResourceView* noteTexture;
     ID3D11ShaderResourceView* noteTap;
@@ -180,6 +224,15 @@ private:
     ID3D11ShaderResourceView* noteUntiMirror;
     ID3D11ShaderResourceView* noteMirror;
     ID3D11ShaderResourceView* Beam;
+
+    std::vector<JudggeCircle> judggeCircles;  // 6レーン分
+
+    ID3D11ShaderResourceView* sTexture;
+    ID3D11ShaderResourceView* dTexture;
+    ID3D11ShaderResourceView* fTexture;
+    ID3D11ShaderResourceView* jTexture;
+    ID3D11ShaderResourceView* kTexture;
+    ID3D11ShaderResourceView* lTexture;
 
     void Update(DX::StepTimer const& timer);
     void Render();

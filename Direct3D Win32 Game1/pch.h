@@ -50,6 +50,10 @@
 #include <stdexcept>
 #include <system_error>
 #include <tuple>
+#include <Model.h>
+#include <Effects.h>
+#include <CommonStates.h>
+#include <SimpleMath.h>
 
 #ifdef _DEBUG
 #include <dxgidebug.h>

@@ -23,7 +23,7 @@ public:
     int lane = 0;   // キー対応（0=S,1=D,2=F,3=J,4=K,5=L）
     float y;    // Y座標
     float time; //判定時刻
-    float spawnTime = -1.0f;    //出現時刻(-1ならtime = -2.0f)
+    float spawnTime = 1.0f;    //出現時刻(-1ならtime = -2.0f)
     float startLong;
     float endLong;
     float lenght;   //ビーム用
