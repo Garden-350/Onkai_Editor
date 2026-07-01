@@ -49,6 +49,7 @@ struct JudggeCircleframe {
     float time; //いつ
     float x;    //どこにいるか
     float y;
+    float z;
 };
 
 struct JudggeCircle {
@@ -57,11 +58,14 @@ struct JudggeCircle {
     std::vector<JudggeCircleframe> keyframe;
     ID3D11ShaderResourceView* texture = nullptr;
 
+    float currentX = 0.0f;
+    float currentY = -55.0f;
+
     DirectX::SimpleMath::Vector3 GetPosition(float t) const
     {
         if (keyframe.empty()) return { 0.0f,-55.0f,fixedZ };
-        if (t <= keyframe.front().time) return { keyframe.front().x,keyframe.front().y,fixedZ };
-        if (t >= keyframe.back().time) return { keyframe.back().x,keyframe.back().y,fixedZ };
+        if (t <= keyframe.front().time) return { keyframe.front().x, -55.0f, keyframe.front().z };
+        if (t >= keyframe.back().time)  return { keyframe.back().x,  -55.0f, keyframe.back().z };
 
         for (int i = 0; i + 1 < (int)keyframe.size(); i++)
         {
@@ -71,13 +75,16 @@ struct JudggeCircle {
             {
                 float ratio = (t - a.time) / (b.time - a.time);
                 return{
+                    //a.x + (b.x - a.x) * ratio,
+                    //a.y + (b.y - a.y) * ratio,
+                    //fixedZ
                     a.x + (b.x - a.x) * ratio,
-                    a.y + (b.y - a.y) * ratio,
-                    fixedZ
+                    -55.0f,
+                    a.z + (b.z - a.z) * ratio
                 };
             }
         }
-        return { keyframe.back().x, keyframe.back().y, fixedZ };
+        return { keyframe.back().x, -55.0f, keyframe.back().z };
     }
 };
 
@@ -176,7 +183,7 @@ private:
     float chartPosX = 0.0f;
     float currentBeat = 0.0f;
 
-    DirectX::SimpleMath::Vector3 cameraPos = { 0.0f, 800.0f, -200.0f };
+    DirectX::SimpleMath::Vector3 cameraPos = { 0.0f, -800.0f, -200.0f };
 
     int center = 0;
     int totalBeat = 1000;

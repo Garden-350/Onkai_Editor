@@ -150,14 +150,19 @@ void Game::Initialize(HWND window, int width, int height)
     //判定円テクスチャロード
     ID3D11Device* dev = m_deviceResources->GetD3DDevice();
     CreateWICTextureFromFile(dev, L"asset/S.png", nullptr, &sTexture);
+    CreateWICTextureFromFile(dev, L"asset/D.png", nullptr, &dTexture);
+    CreateWICTextureFromFile(dev, L"asset/F.png", nullptr, &fTexture);
+    CreateWICTextureFromFile(dev, L"asset/J.png", nullptr, &jTexture);
+    CreateWICTextureFromFile(dev, L"asset/K.png", nullptr, &kTexture);
+    CreateWICTextureFromFile(dev, L"asset/L.png", nullptr, &lTexture);
     //ほかのテクスチャもこのしたに追加
     
     //==================================
-    judggeCircles.resize(1); //あとでテクスチャしっかり用意できたら6に変更
-    ID3D11ShaderResourceView* texList[1] = {
-        sTexture,/*d,f,j,k,l,をあとで追加*/
+    judggeCircles.resize(6); //あとでテクスチャしっかり用意できたら6に変更
+    ID3D11ShaderResourceView* texList[6] = {
+        sTexture, dTexture, fTexture, jTexture, kTexture, lTexture,/*d,f,j,k,l,をあとで追加*/
     };
-    for (int i = 0; i < 1; i++)
+    for (int i = 0; i < 5; i++)
     {
         judggeCircles[i].lane = i;
         judggeCircles[i].texture = texList[i];
@@ -165,7 +170,7 @@ void Game::Initialize(HWND window, int width, int height)
 
         //デフォルトキーフレーム
         float defaultX = -310.0f + (660.0f / 6.0f) * i + (660.0f / 12.0f);
-        judggeCircles[i].keyframe.push_back({ 0.0f,defaultX,-55.0f });
+        judggeCircles[i].keyframe.push_back({ 0.0f,defaultX,-55.0f, -210.0f });
     }
 
     // ※ 3Dモデルのロード情報（現在は未使用）
@@ -254,7 +259,7 @@ void Game::Update(DX::StepTimer const& timer)
         {
             if (note.lane < 0 || note.lane >= (int)judggeCircles.size()) continue;
             const auto& circle = judggeCircles[note.lane];
-            auto circlePos = circle.GetPosition(note.time);
+            auto circlePos = circle.GetPosition(now);
             note.judgePos = circlePos;
         }
     }
@@ -424,7 +429,7 @@ void Game::Update(DX::StepTimer const& timer)
     if (mirrorLane >= LANE_COUNT) mirrorLane = LANE_COUNT;
 
     // マウスホイールでエディタのスクロール量を更新
-    scroll += ImGui::GetIO().MouseWheel * 40.0f;
+    //scroll += ImGui::GetIO().MouseWheel * 40.0f;
 
     // ─ スペースキー：BGM 再生 / 一時停止 / 再開 ────────────────────
     static bool KeySpacePrev = false;
@@ -659,6 +664,59 @@ void Game::Render()
         ImGui::SameLine();
         if (ImGui::Button("Load", ImVec2(90, 0)))
             LoadChart(filename);
+
+        //判定円を動かすところ─────────────────────
+        ImGui::SeparatorText("Judgge Circles");
+
+        const char* laneNames[] = { "S","D","F","J","K","L" };
+
+        for (int i = 0; i < (int)judggeCircles.size(); i++)
+        {
+            auto& circle = judggeCircles[i];
+
+            if (ImGui::TreeNode(laneNames[i]))
+            {
+                //キーフレーム一覧
+                for (int k = 0; k < (int)circle.keyframe.size(); k++)
+                {
+                    auto& key = circle.keyframe[k];
+                    ImGui::PushID(k);
+                    ImGui::SliderFloat("time", &key.time, 0.0f,255.0f);
+                    ImGui::SliderFloat("x", &key.x, -255.0f,255.0f);
+                    ImGui::SliderFloat("z", &key.z, 255.0f,-255.0f);
+                    ImGui::SameLine();
+                    if (ImGui::Button("x")) //削除
+                    {
+                        circle.keyframe.erase(circle.keyframe.begin() + k);
+                        ImGui::PopID();
+                        break;
+                    }
+                    ImGui::PopID();
+                }
+
+                static float newKeyTime = 0.0f;
+                static float newKeyX = 0.0f;
+                static float newKeyY = -55.0f;
+                static float newKeyZ = -210.0f;
+
+                ImGui::InputFloat("Time to add", &newKeyTime, 0.1f);
+                ImGui::InputFloat("X to add", &newKeyX, 1.0f);
+                ImGui::InputFloat("Z to add", &newKeyZ, 1.0f);
+
+                if (ImGui::Button("+ Add KeyFrame"))
+                {
+                    circle.keyframe.push_back({ newKeyTime, newKeyX, 0.0f, newKeyZ });
+
+                    // 時刻順にソート
+                    std::sort(circle.keyframe.begin(), circle.keyframe.end(),
+                        [](const JudggeCircleframe& a, const JudggeCircleframe& b) {
+                            return a.time < b.time;
+                        });
+                }
+                ImGui::TreePop();
+            }
+        }
+
 
         // ── 選択中ノーツのプロパティ編集 ──────────
         ImGui::SeparatorText("Selected Note");
@@ -1065,13 +1123,13 @@ void Game::Render()
             if (screenPos.z >= 1.0f) continue;
 
             spriteBatch->Draw(
-                circle.texture,
-                DirectX::XMFLOAT2(screenPos.x, screenPos.y),
+                circle.texture,     //sTextureセット
+                DirectX::XMFLOAT2(screenPos.x, screenPos.y),    //ピクセル座標セット
                 &srcRect,
                 DirectX::Colors::White,
-                0.0f,
-                origin,
-                size / 128.0f
+                0.0f,   //回転なし
+                origin, //画像の中心を基準に
+                size / 128.0f   //スケール
             );
         }
         spriteBatch->End();
