@@ -139,6 +139,8 @@ public:
     void JudgeLongNoteK();
     void JudgeLongNoteL();
 
+    void UpdateCamera();
+
     bool NoteExit(int lane, float time);
 
     int GetMirrorLane(int lane);
@@ -184,6 +186,15 @@ private:
     float currentBeat = 0.0f;
 
     DirectX::SimpleMath::Vector3 cameraPos = { 0.0f, -800.0f, -200.0f };
+    DirectX::XMFLOAT3 m_camPos = { 0.0f, 0.0f, 400.0f };
+    DirectX::XMFLOAT3 m_camLook = { 0.0f, -55.0f,   0.0f };
+    DirectX::XMFLOAT3 m_camUp = { 0.0f,   1.0f,     0.0f };
+    float m_camFovy = DirectX::XMConvertToRadians(60.0f);
+    float m_camAspect = 16.0f / 9.0f;
+    float m_camNear = 1.0f;
+    float m_camFar = 5000.0f;
+    int m_camState = 0; //0=NONE 1=ORBIT 2=TRACK 3=DOLLY 4=FLIGHT
+    POINT m_camOldPos = {};
 
     int center = 0;
     int totalBeat = 1000;
@@ -214,7 +225,7 @@ private:
     bool mouseDown = GetAsyncKeyState(VK_LBUTTON) & 0x8000;
     bool mousePressed = GetAsyncKeyState(VK_LBUTTON) & 0x0001;
     bool longStart = false;
-    bool sideViewMode = false;
+    bool ViewMode = false;
     float noteTime;
     float breakTime = -100.0f;
 

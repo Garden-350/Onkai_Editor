@@ -268,13 +268,13 @@ void Game::Update(DX::StepTimer const& timer)
 
     // ─ Q/W キー : oknort フラグ切替 ──────────
     // Q で ON、W で OFF（用途は未実装）
-    if (GetAsyncKeyState('Q') & 0x0001) oknort = true;
-    if (GetAsyncKeyState('W') & 0x0001 && oknort == true) oknort = false;
+    //if (GetAsyncKeyState('Q') & 0x0001) oknort = true;
+    //if (GetAsyncKeyState('W') & 0x0001 && oknort == true) oknort = false;
 
     // ─ Z/X キー : ミラーモード切替 ────────────
     // Z で ON（左右レーン反転）、X で OFF
-    if (GetAsyncKeyState('Z') & 0x0001) mirrorMode = true;
-    if (GetAsyncKeyState('X') & 0x0001 && mirrorMode == true) mirrorMode = false;
+    //if (GetAsyncKeyState('Z') & 0x0001) mirrorMode = true;
+    //if (GetAsyncKeyState('X') & 0x0001 && mirrorMode == true) mirrorMode = false;
 
     // ロングノーツの判定間隔スライダー（ImGui UI）
     ImGui::SliderFloat("Long Interval", &LongInterval, 0.03f, 0.5f);
@@ -318,12 +318,20 @@ void Game::Update(DX::StepTimer const& timer)
         rayDir = farPoint - nearPoint;
         rayDir.Normalize();
 
+        DirectX::SimpleMath::Vector3 camForward = DirectX::SimpleMath::Vector3(m_camLook) - DirectX::SimpleMath::Vector3(m_camPos);
+        camForward.Normalize();
+        constexpr float PlaneDistance = 500.0f; //  カメラからの距離（任意調整）
+        DirectX::SimpleMath::Vector3 planePoint =
+            DirectX::SimpleMath::Vector3(m_camPos) + camForward * PlaneDistance;
+
+        float denom = rayDir.Dot(camForward);
         // y=-55 の水平面とレイの交点を計算
         constexpr float noteY = -55.0f;
         bool hasHit = false;
-        if (fabsf(rayDir.y) > 1e-5f) // y成分がほぼ0でなければ（水平レイは交差しない）
+        if (fabsf(denom) > 1e-5f) // y成分がほぼ0でなければ（水平レイは交差しない）
         {
-            float t = (noteY - nearPoint.y) / rayDir.y; // 交点パラメータ
+            float t = (planePoint - nearPoint).Dot(camForward) / denom;
+            //float t = (noteY - nearPoint.y) / rayDir.y; // 交点パラメータ
             if (t > 0.0f) // カメラ後方には交差しない
             {
                 worldPos = nearPoint + rayDir * t; // 交点座標（ワールド）
@@ -361,13 +369,13 @@ void Game::Update(DX::StepTimer const& timer)
 
             case EditorState::PLACING_SPAWN:
                 // ノーツ配置ステップ1：出現位置(spawnPos)を決定
-                m_TempNote.spawnPos = { worldX, noteY, worldZ };
+                m_TempNote.spawnPos = { worldX, worldPos.y, worldZ };
                 m_EditorState = EditorState::PLACING_JUDGE; // 次は判定位置
                 break;
 
             case EditorState::PLACING_JUDGE:
                 // ノーツ配置ステップ2：判定位置(judgePos)を決定 → ノーツをリストへ追加
-                m_TempNote.judgePos = { worldX, noteY, worldZ };
+                m_TempNote.judgePos = { worldX, worldPos.y, worldZ };
                 if (m_TempNote.time <= m_TempNote.spawnTime)
                     m_TempNote.time = m_TempNote.spawnTime + 0.1f; // 時刻の整合性チェック
                 notes.push_back(m_TempNote);
@@ -413,12 +421,7 @@ void Game::Update(DX::StepTimer const& timer)
     }
 
     // ─ カメラ移動（J/L: X軸  I/K: Y軸  U/O: Z軸）──────────────────
-    if (GetAsyncKeyState('J') & 0x8000) cameraPos.x -= 1.0f;
-    if (GetAsyncKeyState('L') & 0x8000) cameraPos.x += 1.0f;
-    if (GetAsyncKeyState('I') & 0x8000) cameraPos.y += 1.0f;
-    if (GetAsyncKeyState('K') & 0x8000) cameraPos.y -= 1.0f;
-    if (GetAsyncKeyState('O') & 0x8000) cameraPos.z += 1.0f;
-    if (GetAsyncKeyState('U') & 0x8000) cameraPos.z -= 1.0f;
+    UpdateCamera();
 
     // （ノーツ判定関数は現在コメントアウト中）
 
@@ -519,7 +522,18 @@ void Game::Render()
     // ── View / Projection 行列の設定 ─────────────
     float aspect = chartW / chartH;
 
-    if (sideViewMode)
+    m_camAspect = chartW / chartH;
+    m_view = DirectX::SimpleMath::Matrix(
+        DirectX::XMMatrixLookAtLH(
+            DirectX::XMLoadFloat3(&m_camPos),
+            DirectX::XMLoadFloat3(&m_camLook),
+            DirectX::XMLoadFloat3(&m_camUp)
+        )
+    );
+    m_proj = DirectX::SimpleMath::Matrix::CreatePerspectiveFieldOfView(
+        m_camFovy, m_camAspect, m_camNear, m_camFar
+    );
+    if (ViewMode)
     {
         // サイドビュー：斜めからステージ全体を俯瞰
         m_view = Matrix::CreateLookAt(
@@ -527,16 +541,23 @@ void Game::Render()
             Vector3(0.0f, -55.0f, 400.0f),
             Vector3::UnitY
         );
+        //    // デフォルトビュー：真上から真下（Z+ 方向）を見下ろす
+        //m_view = Matrix::CreateLookAt(
+        //    Vector3(cameraPos.x, cameraPos.y, cameraPos.z),
+        //    Vector3(cameraPos.x, -55.0f, cameraPos.z + 1.0f),
+        //    Vector3::UnitZ
+        //);
     }
-    else
-    {
-        // デフォルトビュー：真上から真下（Z+ 方向）を見下ろす
-        m_view = Matrix::CreateLookAt(
-            Vector3(cameraPos.x, cameraPos.y, cameraPos.z),
-            Vector3(cameraPos.x, -55.0f, cameraPos.z + 1.0f),
-            Vector3::UnitZ
-        );
-    }
+    //else
+    //{
+    //    // デフォルトビュー：真上から真下（Z+ 方向）を見下ろす
+    //    m_view = Matrix::CreateLookAt(
+    //        Vector3(cameraPos.x, cameraPos.y, cameraPos.z),
+    //        Vector3(cameraPos.x, -55.0f, cameraPos.z + 1.0f),
+    //        Vector3::UnitZ
+    //    );
+    //}
+  
 
     m_proj = Matrix::CreatePerspectiveFieldOfView(
         XMConvertToRadians(60.0f), // 水平FOV 60度
@@ -575,13 +596,12 @@ void Game::Render()
                                     SLIDE_RIGHT, SLIDE_LEFT, SLIDE_UP, SLIDE_DOWN };
 
         // カメラビュー切替ボタン
-        if (ImGui::Button("Side View", ImVec2(-1, 0))) {
-            sideViewMode = true;
-            cameraPos = { 800.0f, 0.0f, 400.0f };
+        if (ImGui::Button("Play View", ImVec2(-1, 0))) {
+            ViewMode = true;
+            cameraPos = { 0.0f, 0.0f, -500.0f };
         }
         if (ImGui::Button("Default View", ImVec2(-1, 0))) {
-            sideViewMode = false;
-            cameraPos = { 0.0f, -800.0f, 0.0f };
+            ViewMode = false;
         }
 
         // 各ノーツ種別ボタン（選択中は青くハイライト）
@@ -1648,6 +1668,158 @@ void Game::JudgeLongNoteJ() {}
 void Game::JudgeLongNoteK() {}
 void Game::JudgeLongNoteL() {}
 
+void Game::UpdateCamera()
+{
+    //状態更新----------------------------------------------------
+    int prev = m_camState;
+    bool altDown = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+    bool iBtn = (GetAsyncKeyState('I') & 0x8000) != 0;
+    bool oBtn = (GetAsyncKeyState('O') & 0x8000) != 0;
+    bool pBtn = (GetAsyncKeyState('P') & 0x8000) != 0;
+
+    if (altDown)
+    {
+        m_camState = 0;
+        if (iBtn) m_camState = 1;   //ORBIT
+        if (oBtn) m_camState = 2;   //TRACK
+        if (pBtn) m_camState = 3;   //DOLLY
+    }
+    else if (pBtn)
+    {
+        m_camState = 4; //FLIGHT
+    }
+    else
+    {
+        m_camState = 0;
+    }
+
+    if (prev != m_camState)
+    {
+        GetCursorPos(&m_camOldPos);
+    }
+    if (m_camState == 0) return;
+
+    //マウス移動量
+    POINT cursorPos;
+    GetCursorPos(&cursorPos);
+    float mouseDX = (float)(cursorPos.x - m_camOldPos.x);
+    float mouseDY = (float)(cursorPos.y - m_camOldPos.y);
+    m_camOldPos = cursorPos;
+
+    //カメラ姿勢ベクトル計算
+    XMVECTOR vPos = XMLoadFloat3(&m_camPos);
+    XMVECTOR vLook = XMLoadFloat3(&m_camLook);
+    XMVECTOR vUp = XMVector3Normalize(XMLoadFloat3(&m_camUp));
+    XMVECTOR vFront = XMVector3Normalize(XMVectorSubtract(vLook, vPos));
+    XMVECTOR vSide = XMVector3Normalize(XMVector3Cross(vUp, vFront));
+    vUp = XMVector3Normalize(XMVector3Cross(vFront, vSide));
+
+    if (XMVector3Equal(vFront, XMVectorZero())) return;
+    vFront = XMVector3Normalize(vFront);
+
+    if (XMVector3Equal(vSide, XMVectorZero())) return;
+    vSide = XMVector3Normalize(vSide);
+
+    vUp = XMVector3Normalize(XMVector3Cross(vFront, vSide));
+
+
+    XMVECTOR vFrontLen = XMVectorSubtract(vLook, vPos);
+    float focus;
+    XMStoreFloat(&focus, XMVector3Length(vFrontLen));
+    if (focus < 0.001f) return;
+
+    switch (m_camState)
+    {
+    case 1: //ORBIT
+    {
+        float angleX = 360.0f * mouseDX / 1280.0f;
+        float angleY = 180.0f * mouseDY / 720.0f;
+
+        XMMATRIX matRotY = XMMatrixRotationY(XMConvertToRadians(angleX));
+        XMVECTOR vAxis = XMVector3Normalize(XMVector3TransformCoord(vSide, matRotY));
+        XMMATRIX matRotSide = XMMatrixRotationAxis(vAxis, XMConvertToRadians(angleY));
+        XMVECTOR vRelative = XMVector3TransformCoord(
+            XMVectorScale(vFront, focus), matRotY * matRotSide
+        );
+        XMStoreFloat3(&m_camPos, XMVectorSubtract(vLook, vRelative));
+        XMStoreFloat3(&m_camUp, XMVector3Normalize(
+            XMVector3Cross(XMVector3Normalize(vRelative), vAxis)));
+        break;
+    }
+    case 2: //TRACK
+    {
+        float farScreenHeight = tanf(m_camFovy * 0.5f) * m_camFar;
+        float farMoveX = -farScreenHeight * (mouseDX / 640.0f) * m_camAspect;
+        float farMoveY = farScreenHeight * (mouseDY / 360.0f);
+        float rate = focus / m_camFar;
+
+        XMVECTOR vMove = XMVectorZero();
+        vMove = XMVectorAdd(vMove, XMVectorScale(vSide, farMoveX * rate));
+        vMove = XMVectorAdd(vMove, XMVectorScale(vUp, farMoveY * rate));
+        XMStoreFloat3(&m_camPos, XMVectorAdd(vPos, vMove));
+        XMStoreFloat3(&m_camLook, XMVectorAdd(vLook, vMove));
+        break;
+    }
+    case 3: //DOLLY
+    {
+        float rate = focus / m_camFar;
+        XMVECTOR vMove = XMVectorScale(vFront,
+            m_camFar * 0.01f * rate * (mouseDX + mouseDY));
+        XMStoreFloat3(&m_camPos, XMVectorAdd(vPos, vMove));
+        break;
+    }
+    case 4: //FLIGHT
+    {
+        float angleX = 360.0f * mouseDX / 1280.0f;
+        float angleY = 180.0f * mouseDY / 720.0f;
+
+        XMMATRIX matUpRot = XMMatrixRotationY(XMConvertToRadians(angleX));
+        XMVECTOR vSideAxis = XMVector3Normalize(XMVector3TransformCoord(vSide, matUpRot));
+        XMMATRIX matSideRot = XMMatrixRotationAxis(vSideAxis, XMConvertToRadians(angleY));
+        XMVECTOR vFrontAxis = XMVector3Normalize(
+            XMVector3TransformCoord(vFront, matUpRot * matSideRot));
+
+        XMVECTOR vMove = XMVectorZero();
+        if (GetAsyncKeyState('W') & 0x8000) vMove = XMVectorAdd(vMove, vFrontAxis);
+        if (GetAsyncKeyState('S') & 0x8000) vMove = XMVectorSubtract(vMove, vFrontAxis);
+        if (GetAsyncKeyState('A') & 0x8000) vMove = XMVectorSubtract(vMove, vSideAxis);
+        if (GetAsyncKeyState('D') & 0x8000) vMove = XMVectorAdd(vMove, vSideAxis);
+        vMove = XMVectorScale(vMove, 5.0f);
+
+        XMVECTOR vNewPos = XMVectorAdd(vPos, vMove);
+
+        constexpr float k0rbitSpeed = 0.1f;
+        float pitchDeg = 0.0f;
+        if (GetAsyncKeyState('Q') & 0x8000) pitchDeg += k0rbitSpeed;
+        if (GetAsyncKeyState('E') & 0x8000) pitchDeg -= k0rbitSpeed;
+        float yawDeg = 0.0f;
+        if (GetAsyncKeyState('C') & 0x8000) yawDeg -= k0rbitSpeed;
+        if (GetAsyncKeyState('Z') & 0x8000) yawDeg += k0rbitSpeed;
+        XMVECTOR vRadius = XMVectorSubtract(vNewPos, vLook);
+        if (pitchDeg != 0.0f)
+        {
+            XMMATRIX matPitch = XMMatrixRotationAxis(vSideAxis, XMConvertToRadians(pitchDeg));
+            vRadius = XMVector3TransformCoord(vRadius, matPitch);
+        }
+        if (yawDeg != 0.0f)
+        {
+            XMVECTOR vUpAxis = XMVector3Normalize(vUp);
+            XMMATRIX matYaw = XMMatrixRotationAxis(vUpAxis, XMConvertToRadians(yawDeg));
+            vRadius = XMVector3TransformCoord(vRadius, matYaw);
+        }
+        vNewPos = XMVectorAdd(vLook, vRadius);
+
+        XMStoreFloat3(&m_camPos, vNewPos);
+        XMStoreFloat3(&m_camLook, XMVectorAdd(vNewPos,
+            XMVectorScale(vFrontAxis, focus)));
+        XMStoreFloat3(&m_camUp, XMVector3Normalize(
+            XMVector3Cross(vFrontAxis, vSideAxis)));
+        break;
+    }
+
+    }
+}
+
 // ─────────────────────────────────────────────
 // NoteExit : 指定レーン・時刻にノーツが存在するか確認
 //   lane : 対象レーン
@@ -1666,7 +1838,7 @@ bool Game::NoteExit(int lane, float time)
 
 // ─────────────────────────────────────────────
 // GetMirrorLane : ミラーモード時のレーン番号変換
-//   ※ 現在は実装が未完成（戻り値なし → UB の可能性あり）
+//   ※ 現在は実装が未完成
 // ─────────────────────────────────────────────
 int Game::GetMirrorLane(int lane)
 {
