@@ -17,6 +17,7 @@
 
 #include "sound.h"
 #include <memory>
+#include <Model.h>
 
 enum class BGMstate
 {
@@ -79,12 +80,12 @@ struct JudggeCircle {
                     //a.y + (b.y - a.y) * ratio,
                     //fixedZ
                     a.x + (b.x - a.x) * ratio,
-                    -55.0f,
+                    a.y + (b.y - a.y) * ratio,
                     a.z + (b.z - a.z) * ratio
                 };
             }
         }
-        return { keyframe.back().x, -55.0f, keyframe.back().z };
+        return { keyframe.back().x, keyframe.back().y, keyframe.back().z};
     }
 };
 
@@ -139,6 +140,8 @@ public:
     void JudgeLongNoteK();
     void JudgeLongNoteL();
 
+    void JudggeLane(char key, int laneIndex);
+
     void UpdateCamera();
 
     bool NoteExit(int lane, float time);
@@ -154,6 +157,7 @@ private:
     std::chrono::steady_clock::time_point musicStartTime;
 
     std::unique_ptr<DirectX::PrimitiveBatch<DirectX::VertexPositionColor>> m_primitiveBatch;
+    std::unique_ptr<DirectX::PrimitiveBatch<DirectX::VertexPositionColor>> m_yLine;
     std::unique_ptr<DirectX::BasicEffect> m_basicEffect;
     std::unique_ptr<DirectX::CommonStates> m_states;
     std::unique_ptr<DirectX::Model> m_noteModel;
@@ -165,6 +169,17 @@ private:
 
     DirectX::SimpleMath::Matrix m_view; //カメラの向き
     DirectX::SimpleMath::Matrix m_proj; //2D変換
+
+    struct LaneKey { char key; int laneIndex; };
+    static constexpr LaneKey kLaneKeys[6] = {
+        {'S',0},{'D',1},{'F',2},{'J',3},{'K',4},{'L',5}
+    };
+    struct JudggeEffect
+    {
+        int rank = -1;  // 0=PERFECT, 1=GREAT, 2=GUD, 3=MISS -1=非表示
+        float timer = 0.0f; //何秒表示させるか
+    };
+    JudggeEffect m_judggeEffects[6];
 
     const int LANE_COUNT = 6;
     int measure = 80;
@@ -184,11 +199,15 @@ private:
     float LongInterval = 0.1f;
     float chartPosX = 0.0f;
     float currentBeat = 0.0f;
+    float m_PlacementHeight = -55.0f; // 配置基準面のY座標(上下方法は後々)
 
     DirectX::SimpleMath::Vector3 cameraPos = { 0.0f, -800.0f, -200.0f };
-    DirectX::XMFLOAT3 m_camPos = { 0.0f, 0.0f, 400.0f };
-    DirectX::XMFLOAT3 m_camLook = { 0.0f, -55.0f,   0.0f };
-    DirectX::XMFLOAT3 m_camUp = { 0.0f,   1.0f,     0.0f };
+    // レーン中心(X=0)、判定ラインZ=-210〜出現Z=1000あたりの中間くらいの高さで側面から
+    DirectX::XMFLOAT3 m_camSidePos = { 0.0f, 0.0f, 800.0f };  // 400 → 800くらいに
+    DirectX::XMFLOAT3 m_camPos = { -555.0f, 700.0f, -65.0f };  // X方向に大きく離す
+    DirectX::XMFLOAT3 m_camLook = { -950.0f,  1240.0f, -65.0f };  // 同じZ・Y座標を注視
+    //DirectX::XMFLOAT3 m_camLook = { 0.0f,  -55.0f, 400.0f };  // 同じZ・Y座標を注視
+    DirectX::XMFLOAT3 m_camUp = { 0.0f,   1.0f,   0.0f };
     float m_camFovy = DirectX::XMConvertToRadians(60.0f);
     float m_camAspect = 16.0f / 9.0f;
     float m_camNear = 1.0f;
@@ -203,6 +222,9 @@ private:
     int mirrorLane = 3;
     int totalSteps = totalBeat * division;
     int success = 0;
+    int perfect = 0;
+    int great = 0;
+    int good = 0;
     int miss = 0;
     int bpm = 120;
     int LongStartLane = 0;
@@ -251,6 +273,11 @@ private:
     ID3D11ShaderResourceView* jTexture;
     ID3D11ShaderResourceView* kTexture;
     ID3D11ShaderResourceView* lTexture;
+
+    ID3D11ShaderResourceView* perfectTexture;
+    ID3D11ShaderResourceView* greatTexture;
+    ID3D11ShaderResourceView* goodTexture;
+    ID3D11ShaderResourceView* missTexture;
 
     void Update(DX::StepTimer const& timer);
     void Render();

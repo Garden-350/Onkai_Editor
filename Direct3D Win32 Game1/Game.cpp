@@ -56,6 +56,11 @@ constexpr float kPreviewScaleXZ = 0.0351f;
 constexpr float kPreviewScaleY = 0.3512f;
 constexpr float kPreviewScaleYZ = 0.0543f;
 
+//判定タイミング(調整必須)
+constexpr float kPerfect = 0.02f;
+constexpr float kGreat = 0.04f;
+constexpr float kGud = 0.06f;
+
 // ─────────────────────────────────────────────
 // LerpVector3 : 2つのVector3を線形補間する
 //   a, b : 補間元・補間先
@@ -155,6 +160,11 @@ void Game::Initialize(HWND window, int width, int height)
     CreateWICTextureFromFile(dev, L"asset/J.png", nullptr, &jTexture);
     CreateWICTextureFromFile(dev, L"asset/K.png", nullptr, &kTexture);
     CreateWICTextureFromFile(dev, L"asset/L.png", nullptr, &lTexture);
+
+    CreateWICTextureFromFile(dev, L"asset/PER.png", nullptr, &perfectTexture);
+    CreateWICTextureFromFile(dev, L"asset/GRE.png", nullptr, &greatTexture);
+    CreateWICTextureFromFile(dev, L"asset/GOO.png", nullptr, &goodTexture);
+    CreateWICTextureFromFile(dev, L"asset/MIS.png", nullptr, &missTexture);
     //ほかのテクスチャもこのしたに追加
     
     //==================================
@@ -162,14 +172,14 @@ void Game::Initialize(HWND window, int width, int height)
     ID3D11ShaderResourceView* texList[6] = {
         sTexture, dTexture, fTexture, jTexture, kTexture, lTexture,/*d,f,j,k,l,をあとで追加*/
     };
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 6; i++)
     {
         judggeCircles[i].lane = i;
         judggeCircles[i].texture = texList[i];
         judggeCircles[i].fixedZ = -210.0f;
 
         //デフォルトキーフレーム
-        float defaultX = -310.0f + (660.0f / 6.0f) * i + (660.0f / 12.0f);
+        float defaultX = -( - 240.0f + (540.0f / 6.0f) * i + (600.0f / 12.0f));
         judggeCircles[i].keyframe.push_back({ 0.0f,defaultX,-55.0f, -210.0f });
     }
 
@@ -273,8 +283,8 @@ void Game::Update(DX::StepTimer const& timer)
 
     // ─ Z/X キー : ミラーモード切替 ────────────
     // Z で ON（左右レーン反転）、X で OFF
-    //if (GetAsyncKeyState('Z') & 0x0001) mirrorMode = true;
-    //if (GetAsyncKeyState('X') & 0x0001 && mirrorMode == true) mirrorMode = false;
+    if (GetAsyncKeyState('Z') & 0x0001) mirrorMode = true;
+    if (GetAsyncKeyState('X') & 0x0001 && mirrorMode == true) mirrorMode = false;
 
     // ロングノーツの判定間隔スライダー（ImGui UI）
     ImGui::SliderFloat("Long Interval", &LongInterval, 0.03f, 0.5f);
@@ -325,13 +335,18 @@ void Game::Update(DX::StepTimer const& timer)
             DirectX::SimpleMath::Vector3(m_camPos) + camForward * PlaneDistance;
 
         float denom = rayDir.Dot(camForward);
+        if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
+        {
+            m_PlacementHeight += ImGui::GetIO().MouseWheel * 10.0f; // 感度は調整
+        }
         // y=-55 の水平面とレイの交点を計算
         constexpr float noteY = -55.0f;
         bool hasHit = false;
         if (fabsf(denom) > 1e-5f) // y成分がほぼ0でなければ（水平レイは交差しない）
         {
-            float t = (planePoint - nearPoint).Dot(camForward) / denom;
+            //float t = (planePoint - nearPoint).Dot(camForward) / denom;
             //float t = (noteY - nearPoint.y) / rayDir.y; // 交点パラメータ
+            float t = (m_PlacementHeight - nearPoint.y) / rayDir.y;
             if (t > 0.0f) // カメラ後方には交差しない
             {
                 worldPos = nearPoint + rayDir * t; // 交点座標（ワールド）
@@ -469,20 +484,42 @@ void Game::Update(DX::StepTimer const& timer)
         }
     }
 
+    //ミス判定
+    for (int i = (int)notes.size() - 1; i >= 0; i--)
+    {
+        if (notes[i].note == LONG_START || notes[i].note == LONG_CENTER) continue;
+        if (musicTime - notes[i].time > kGud)
+        {
+            notes.erase(notes.begin() + i);
+            miss++;
+        }
+    }
+
+    for (int i = 0; i < 6; i++)
+    {
+        if (m_judggeEffects[i].timer > 0.0f)
+        {
+            m_judggeEffects[i].timer -= elapsedTime;
+        }
+    }
+
     // ─ 再生中は音楽時間を進める / 停止中はエディタ位置を更新 ────────
     if (bgmstate == BGMstate::play)
     {
         if (highSpeed < 0.0f) highSpeed = 0.0f;
         musicTime += elapsedTime * highSpeed; // ハイスピード倍率をかけて進む
+
+        for (const auto& Ik : kLaneKeys)
+            JudggeLane(Ik.key, Ik.laneIndex);
     }
-    else
-    {
-        // 停止中：マウスホイール または ↑↓ キーで拍位置を移動
-        float wheel = ImGui::GetIO().MouseWheel;
-        editorBeat += wheel;
-        if (GetAsyncKeyState(VK_UP) & 0x8000) editorBeat += 0.1f;
-        if (GetAsyncKeyState(VK_DOWN) & 0x8000) editorBeat -= 0.1f;
-    }
+    //else
+    //{
+    //    // 停止中：マウスホイール または ↑↓ キーで拍位置を移動
+    //    float wheel = ImGui::GetIO().MouseWheel;
+    //    editorBeat += wheel;
+    //    if (GetAsyncKeyState(VK_UP) & 0x8000) editorBeat += 0.1f;
+    //    if (GetAsyncKeyState(VK_DOWN) & 0x8000) editorBeat -= 0.1f;
+    //}
     KeySpacePrev = keySpace;
 }
 #pragma endregion
@@ -514,7 +551,7 @@ void Game::Render()
     // ── レイアウト計算 ─────────────────────────
     float screenW = ImGui::GetIO().DisplaySize.x;
     float screenH = ImGui::GetIO().DisplaySize.y;
-    float leftW = 200.0f;   // 左パネルの幅
+    float leftW = 250.0f;   // 左パネルの幅
     float bottomH = 60.0f;    // 下バーの高さ
     float chartW = screenW - leftW;   // 3Dビューの幅
     float chartH = screenH - bottomH; // 3Dビューの高さ
@@ -538,7 +575,7 @@ void Game::Render()
         // サイドビュー：斜めからステージ全体を俯瞰
         m_view = Matrix::CreateLookAt(
             Vector3(cameraPos.x, cameraPos.y, cameraPos.z),
-            Vector3(0.0f, -55.0f, 400.0f),
+            Vector3(0.0f, -55.0f, -200.0f),
             Vector3::UnitY
         );
         //    // デフォルトビュー：真上から真下（Z+ 方向）を見下ろす
@@ -572,7 +609,33 @@ void Game::Render()
         isOutRange = !(mp.x >= leftW && mp.x <= leftW + chartW &&
             mp.y >= 0.0f && mp.y <= chartH);
     }
+    // ════════════════════════════════════════════
+    // デバッグ情報ウィンドウ
+    // ════════════════════════════════════════════
+    {
+        ImGui::Begin("Debug Info");
 
+        ImGui::Text("camPos:  %.1f, %.1f, %.1f", m_camPos.x, m_camPos.y, m_camPos.z);
+        ImGui::Text("camLook: %.1f, %.1f, %.1f", m_camLook.x, m_camLook.y, m_camLook.z);
+        ImGui::Text("camState: %d", m_camState);
+        ImGui::Text("worldPos: %.1f, %.1f, %.1f", worldPos.x, worldPos.y, worldPos.z);
+        ImGui::Text("rayDir: %.3f, %.3f, %.3f", rayDir.x, rayDir.y, rayDir.z);
+
+        ImGui::End();
+    }
+    // ════════════════════════════════════════════
+    // 判定表示ウィンドウ
+    // ════════════════════════════════════════════
+    {
+        ImGui::Begin("Judgge");
+
+        ImGui::Text("PERFECT:  %.1i", perfect);
+        ImGui::Text("GREAT: %.1i", great);
+        ImGui::Text("GOOD: %i", good);
+        ImGui::Text("MISS: %.1i", miss);
+
+        ImGui::End();
+    }
     // ════════════════════════════════════════════
     // 左パネル UI
     // ════════════════════════════════════════════
@@ -585,9 +648,11 @@ void Game::Render()
 
         // ハイスピード倍率スライダー（ノーツの移動速度）
         ImGui::SliderFloat("HighSpeed", &highSpeed, 0.1f, 5.0f);
-        // デバッグ用：現在のワールド座標とレイ方向
-        ImGui::Text("worldPos: %.1f, %.1f, %.1f", worldPos.x, worldPos.y, worldPos.z);
-        ImGui::Text("rayDir: %.3f, %.3f, %.3f", rayDir.x, rayDir.y, rayDir.z);
+        if (m_EditorState == EditorState::PLACING_SPAWN || m_EditorState == EditorState::PLACING_JUDGE)
+        {
+            ImGui::TextColored(ImVec4(0.6f, 1.0f, 1.0f, 1.0f),
+                "Placement Height: %.1f (Shift+Wheel to adjust)", m_PlacementHeight);
+        }
 
         // ── ノーツ種別選択ボタン ─────────────────
         const char* noteNames[] = { "TAP","LONG","antiMirror","MirrorNote",
@@ -947,6 +1012,12 @@ void Game::Render()
 
     m_primitiveBatch->Begin();
 
+    //y座標が現在どこに設定されてるかをわかりやすくする赤い線　Shift+マウスホイールで上下移動可能
+    m_primitiveBatch->DrawLine(
+        VertexPositionColor(Vector3(0.0f, m_PlacementHeight, 0.0f), Colors::Red),
+        VertexPositionColor(Vector3(0.0f, m_PlacementHeight, 2000.0f), Colors::Red)
+    );
+
     // 判定ライン（z=-210 赤いライン）
     m_primitiveBatch->DrawLine(
         VertexPositionColor(Vector3(-300.0f, -55.0f, -210.0f), Colors::Red),
@@ -1151,6 +1222,40 @@ void Game::Render()
                 origin, //画像の中心を基準に
                 size / 128.0f   //スケール
             );
+        }
+
+        for (int i = 0; i < 6; i++)
+        {
+            if (m_judggeEffects[i].timer <= 0.0f) continue;
+
+            ID3D11ShaderResourceView* tex =
+                (m_judggeEffects[i].rank == 0) ? perfectTexture :
+                (m_judggeEffects[i].rank == 1) ? greatTexture : goodTexture;
+            if (!tex) continue;
+
+            auto pos3D = judggeCircles[i].GetPosition(now);
+            pos3D.y += 40.0f;   //判定円より上
+            pos3D.z += 40.0f;
+
+            XMVECTOR worldVec = XMLoadFloat3(&pos3D);
+            XMVECTOR screenVec = XMVector3Project(
+                worldVec, 0.0f, 0.0f, screenW, screenH, 0.0f, 1.0f, m_proj, m_view, XMMatrixIdentity()
+            );
+
+            XMFLOAT3 screenPos;
+            XMStoreFloat3(&screenPos, screenVec);
+            if (screenPos.z >= 1.0f) continue;
+
+            RECT srcRect = { 0,0,128,64 };  //画像サイズに調整
+            DirectX::XMFLOAT2 origin = { 64.0f,32.0f };
+
+            //タイマー残量でフェードアウト
+            float alpha = m_judggeEffects[i].timer / 0.5f;
+            DirectX::XMVECTORF32 color = { 1.0f,1.0f,1.0f,alpha };
+
+            spriteBatch->Draw(tex,
+                DirectX::XMFLOAT2(screenPos.x, screenPos.y),
+                &srcRect, color, 0.0f, origin, 1.0f);
         }
         spriteBatch->End();
 
@@ -1668,6 +1773,54 @@ void Game::JudgeLongNoteJ() {}
 void Game::JudgeLongNoteK() {}
 void Game::JudgeLongNoteL() {}
 
+void Game::JudggeLane(char key, int laneIndex)
+{
+    if (!(GetAsyncKeyState(key) & 0x0001)) return;  //押した瞬間
+    int targetLane = laneIndex;
+    int bestIndex = -1;
+    float bestDiff = 9999.9f;   //大きい数字を一回代入
+
+    //全ノーツを走査して近いものを探す
+    for (int i = 0; i < (int)notes.size(); i++)
+    {
+        if(notes[i].lane != targetLane) continue;
+        if (notes[i].note == LONG_START || notes[i].note == LONG_CENTER) continue;
+
+        float diff = fabsf(notes[i].time - musicTime);  //時間差で判定
+        if (diff < bestDiff)
+        {
+            bestDiff = diff;
+            bestIndex = i;
+        }
+    }
+    if (bestIndex == -1) return;
+
+    if (bestDiff > kGud) return;    //判定圏外ならスルー
+
+    int rank =
+        (bestDiff < kPerfect) ? 0 :
+        (bestDiff < kGreat) ? 1 : 2;
+    m_judggeEffects[laneIndex].rank = rank;
+    m_judggeEffects[laneIndex].timer = 0.5f;
+    if (rank == 0)
+    {
+        perfect++;
+    }
+    else if (rank == 1)
+    {
+        great++;
+    }
+    else if(rank == 2)
+    {
+        good++;
+    }
+
+    notes.erase(notes.begin() + bestIndex);
+    success++;
+
+
+}
+
 void Game::UpdateCamera()
 {
     //状態更新----------------------------------------------------
@@ -1850,8 +2003,8 @@ int Game::GetMirrorLane(int lane)
 // デフォルトウィンドウサイズ（最小 320x200 以上）
 void Game::GetDefaultSize(int& width, int& height) const noexcept
 {
-    width = 1000;
-    height = 800;
+    width = 1920;
+    height = 1080;
 }
 
 #pragma region Direct3D Resources
