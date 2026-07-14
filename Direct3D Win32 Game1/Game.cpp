@@ -142,6 +142,25 @@ Game::~Game()
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
 }
+// ─────────────────────────────────────────────
+// LoadTextureChecked : テクスチャをロードし、失敗時はデバッグ出力にログを残す
+// ─────────────────────────────────────────────
+static void LoadTextureChecked(ID3D11Device* dev, const wchar_t* path, ID3D11ShaderResourceView** out)
+{
+    HRESULT hr = DirectX::CreateWICTextureFromFile(dev, path, nullptr, out);
+    if (FAILED(hr))
+    {
+        wchar_t buf[256];
+        swprintf_s(buf, L"[TextureLoad FAILED] %s  HRESULT=0x%08X\n", path, hr);
+        OutputDebugStringW(buf);
+    }
+    else
+    {
+        wchar_t buf[256];
+        swprintf_s(buf, L"[TextureLoad OK] %s\n", path);
+        OutputDebugStringW(buf);
+    }
+}
 
 // ─────────────────────────────────────────────
 // Initialize : D3D11リソース初期化 & ImGui セットアップ
@@ -152,19 +171,23 @@ void Game::Initialize(HWND window, int width, int height)
 {
     sound.Init(); // サウンドエンジン初期化
 
+    m_deviceResources->SetWindow(window, width, height);
+    m_deviceResources->CreateDeviceResources();
+    CreateDeviceDependentResources();
+    m_deviceResources->CreateWindowSizeDependentResources();
+    CreateWindowSizeDependentResources();
     //判定円テクスチャロード
     ID3D11Device* dev = m_deviceResources->GetD3DDevice();
-    CreateWICTextureFromFile(dev, L"asset/S.png", nullptr, &sTexture);
-    CreateWICTextureFromFile(dev, L"asset/D.png", nullptr, &dTexture);
-    CreateWICTextureFromFile(dev, L"asset/F.png", nullptr, &fTexture);
-    CreateWICTextureFromFile(dev, L"asset/J.png", nullptr, &jTexture);
-    CreateWICTextureFromFile(dev, L"asset/K.png", nullptr, &kTexture);
-    CreateWICTextureFromFile(dev, L"asset/L.png", nullptr, &lTexture);
-
-    CreateWICTextureFromFile(dev, L"asset/PER.png", nullptr, &perfectTexture);
-    CreateWICTextureFromFile(dev, L"asset/GRE.png", nullptr, &greatTexture);
-    CreateWICTextureFromFile(dev, L"asset/GOO.png", nullptr, &goodTexture);
-    CreateWICTextureFromFile(dev, L"asset/MIS.png", nullptr, &missTexture);
+    LoadTextureChecked(dev, L"asset/S.png", &sTexture);
+    LoadTextureChecked(dev, L"asset/D.png", &dTexture);
+    LoadTextureChecked(dev, L"asset/F.png", &fTexture);
+    LoadTextureChecked(dev, L"asset/J.png", &jTexture);
+    LoadTextureChecked(dev, L"asset/K.png", &kTexture);
+    LoadTextureChecked(dev, L"asset/L.png", &lTexture);
+    LoadTextureChecked(dev, L"asset/PER.png", &perfectTexture);
+    LoadTextureChecked(dev, L"asset/GRE.png", &greatTexture);
+    LoadTextureChecked(dev, L"asset/GOO.png", &goodTexture);
+    LoadTextureChecked(dev, L"asset/MIS.png", &missTexture);
     //ほかのテクスチャもこのしたに追加
     
     //==================================
@@ -198,11 +221,7 @@ void Game::Initialize(HWND window, int width, int height)
         Load3DInfo("asset/Model/Dai/Daiza.obj", "asset/Model"),
     };
 
-    m_deviceResources->SetWindow(window, width, height);
-    m_deviceResources->CreateDeviceResources();
-    CreateDeviceDependentResources();
-    m_deviceResources->CreateWindowSizeDependentResources();
-    CreateWindowSizeDependentResources();
+
 
     // ImGui 初期化
     IMGUI_CHECKVERSION();
