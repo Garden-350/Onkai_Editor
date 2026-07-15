@@ -162,6 +162,117 @@ static void LoadTextureChecked(ID3D11Device* dev, const wchar_t* path, ID3D11Sha
     }
 }
 
+static ImVec2 RotatiePoint(ImVec2 p, ImVec2 center, float angleRad)
+{
+    float s = sinf(angleRad), c = cosf(angleRad);
+    float dx = p.x - center.x;
+    float dy = p.y - center.y;
+    return ImVec2(center.x + dx * c - dy * s, center.y + dy * s + dy * c);
+}
+
+static void AddRotatedSaure(ImDrawList* draw, ImVec2 center, float halfSize,
+    float angleRad, ImU32 col, float thickness = 0.0f, bool filed = false)
+{
+    ImVec2 corners[4] = {
+        ImVec2(center.x - halfSize, center.y - halfSize),
+        ImVec2(center.x + halfSize, center.y - halfSize),
+        ImVec2(center.x + halfSize, center.y + halfSize),
+        ImVec2(center.x - halfSize, center.y + halfSize),
+    };
+    for (int i = 0; i < 4; i++)
+        corners[i] = RotatiePoint(corners[i], center, angleRad);
+
+    if (filed)
+        draw->AddConvexPolyFilled(corners, 4, col);
+    else
+        draw->AddPolyline(corners, 4, col, ImDrawFlags_Closed, thickness);
+}
+
+static void DrawJuddgeBurst(ImDrawList* draw, ImVec2 center, float age, int rank)
+{
+    //age : 0.0(発生直後) - 1.0(消滅直前)
+    float growT = 1.0f - powf(1.0f - age, 3.0f);    // ease-out（最初速く、後でゆっくり広がる）
+    float fade = 1.0f - age;
+
+    //ImU32 coreCol, rayCol, tipCol;
+    ImU32 coreCol, ringCol, orbitCol;
+    float maxRadius;
+    float maxLen;
+    int rayCount;
+    int orbitCount;
+
+    switch (rank)
+    {
+    case 0: // PERFECT
+        coreCol = IM_COL32(255, 255, 150, (int)(255 * fade));
+        ringCol = IM_COL32(255, 220, 40, (int)(230 * fade));
+        orbitCol = IM_COL32(255, 140, 40, (int)(200 * fade));
+        maxRadius = 155.0f; orbitCount = 6;
+        break;
+    case 1: // GREAT
+        coreCol = IM_COL32(180, 255, 200, (int)(255 * fade));
+        ringCol = IM_COL32(120, 255, 160, (int)(220 * fade));
+        orbitCol = IM_COL32(60, 200, 255, (int)(200 * fade));
+        maxRadius = 142.0f; orbitCount = 5;
+        break;
+    default: // GOOD
+        coreCol = IM_COL32(200, 220, 255, (int)(255 * fade));
+        ringCol = IM_COL32(150, 190, 255, (int)(200 * fade));
+        orbitCol = IM_COL32(150, 190, 255, (int)(160 * fade));
+        maxRadius = 132.0f; orbitCount = 4;
+        break;
+    }
+
+    //中心のコア四角　：　発生直後だけ大きく光、収縮しながら回転
+    float coreHalf = 14.0f * (1.0f - growT) + 3.0f;
+    float coreSpin = age * 4.0f;    //ゆっくり回転
+    AddRotatedSaure(draw, center, coreHalf, coreSpin, coreCol, 0.0f, true);
+
+    //メインリング　：　高速回転しながら外側へ広がる
+    float ringHalf = maxRadius * growT;
+    float ringSpin = age * 10.0f;   //数値を上げれば速くなる
+    AddRotatedSaure(draw, center, ringHalf, ringSpin, ringCol, 2.5f * fade + 0.5f, false);
+
+    //二重リング　：　少し遅れて逆回転させる
+    float ringHalf2 = maxRadius * growT * 0.6f;
+    AddRotatedSaure(draw, center, ringHalf2, -ringSpin * 1.4f, ringCol, 1.5f * fade + 0.5f, false);
+
+    //中心の周りを公転する四角s
+    for (int i = 0; i < orbitCount; i++)
+    {
+        float baseAngle = (float)i / orbitCount * 6.2831853;
+        float orbitAngle = baseAngle + age * 6.0f;
+        float orbitRadius = maxRadius * growT;
+
+        ImVec2 orbitCenter(
+            center.x + cosf(orbitAngle) * orbitRadius,
+            center.y + sinf(orbitAngle) * orbitRadius
+        );
+        float smallHalf = 5.0f * fade + 1.0f;
+        float selfSpin = age * 8.0f + baseAngle;    //自転
+        AddRotatedSaure(draw, orbitCenter, smallHalf, selfSpin, orbitCol, 0.0f, true);
+    }
+
+
+    //float coreRadius = 10.0f * (1.0f - growT * 0.5f) + 2.0f;
+    //draw->AddCircleFilled(center, coreRadius, coreCol);
+
+    //for (int i = 0; i < rayCount; i++)
+    //{
+    //    float baseAngle = (float)i / rayCount * 6.2831853f;
+    //    float jitter = sinf((float)i * 12.9898f) * 0.25f;   //疑似ランダムな揺らぎ
+    //    float angle = baseAngle + jitter;
+
+    //    float len = maxLen * growT * (0.6f + 0.4f * fabsf(sinf(i * 3.71f)));
+    //    ImVec2 dir(cosf(angle), sinf(angle));
+    //    ImVec2 p0(center.x + dir.x * coreRadius, center.y + dir.y * coreRadius);
+    //    ImVec2 p1(center.x + dir.x * len, center.y + dir.y * len);
+
+    //    draw->AddLine(p0, p1, rayCol, 2.5f * fade + 0.5f);
+    //    draw->AddCircleFilled(p1, 2.0f * fade, tipCol);
+    //}
+}
+
 // ─────────────────────────────────────────────
 // Initialize : D3D11リソース初期化 & ImGui セットアップ
 //   window : ウィンドウハンドル
@@ -206,20 +317,28 @@ void Game::Initialize(HWND window, int width, int height)
         judggeCircles[i].keyframe.push_back({ 0.0f,defaultX,-55.0f, -210.0f });
     }
 
-    // ※ 3Dモデルのロード情報（現在は未使用）
-    struct Load3DInfo {
-        std::string filename;
-        std::string texdirectoryname;
-        Load3DInfo(std::string p1, std::string p2) {
-            filename = p1;
-            texdirectoryname = p2;
-        }
-    };
-
-    std::array<Load3DInfo, 1> g_loadmodel =
+    //3Dモデルのロード
+    m_noteModel = std::make_unique<NoteModel>();
+    if (!m_noteModel->Load(dev, L"asset/Model/note2/music_sord_1.obj", L"asset/Model/note2"))
     {
-        Load3DInfo("asset/Model/Dai/Daiza.obj", "asset/Model"),
-    };
+        OutputDebugStringW(L"[Game] NoteModel load failed\n");
+        m_noteModel.reset();    //失敗時はnullptrに戻す
+    }
+
+    // ※ 3Dモデルのロード情報（現在は未使用）
+    //struct Load3DInfo {
+    //    std::string filename;
+    //    std::string texdirectoryname;
+    //    Load3DInfo(std::string p1, std::string p2) {
+    //        filename = p1;
+    //        texdirectoryname = p2;
+    //    }
+    //};
+
+    //std::array<Load3DInfo, 1> g_loadmodel =
+    //{
+    //    Load3DInfo("asset/Model/Dai/Daiza.obj", "asset/Model"),
+    //};
 
 
 
@@ -1165,30 +1284,30 @@ void Game::Render()
         float hw = 40.0f; // ノーツ半幅（X方向）
         float hd = 10.0f; // ノーツ半奥行（Z方向）
 
-        XMVECTORF32 col;
-        switch (note.lane)
-        {
-        case 0: col = { 1.0f, 0.3f, 0.3f, 1.0f }; break; // 赤（S）
-        case 1: col = { 1.0f, 0.7f, 0.0f, 1.0f }; break; // 橙（D）
-        case 2: col = { 1.0f, 1.0f, 0.3f, 1.0f }; break; // 黄（F）
-        case 3: col = { 0.3f, 1.0f, 0.3f, 1.0f }; break; // 緑（J）
-        case 4: col = { 0.3f, 0.7f, 1.0f, 1.0f }; break; // 青（K）
-        case 5: col = { 0.7f, 0.3f, 1.0f, 1.0f }; break; // 紫（L）
-        default:col = { 1.0f, 1.0f, 1.0f, 1.0f }; break; // 白（不明）
-        }
+        //XMVECTORF32 col;
+        //switch (note.lane)
+        //{
+        //case 0: col = { 1.0f, 0.3f, 0.3f, 1.0f }; break; // 赤（S）
+        //case 1: col = { 1.0f, 0.7f, 0.0f, 1.0f }; break; // 橙（D）
+        //case 2: col = { 1.0f, 1.0f, 0.3f, 1.0f }; break; // 黄（F）
+        //case 3: col = { 0.3f, 1.0f, 0.3f, 1.0f }; break; // 緑（J）
+        //case 4: col = { 0.3f, 0.7f, 1.0f, 1.0f }; break; // 青（K）
+        //case 5: col = { 0.7f, 0.3f, 1.0f, 1.0f }; break; // 紫（L）
+        //default:col = { 1.0f, 1.0f, 1.0f, 1.0f }; break; // 白（不明）
+        //}
 
-        // XZ 平面上の矩形（4頂点）
-        Vector3 v0 = pos + Vector3(-hw, 0, -hd);
-        Vector3 v1 = pos + Vector3(hw, 0, -hd);
-        Vector3 v2 = pos + Vector3(hw, 0, hd);
-        Vector3 v3 = pos + Vector3(-hw, 0, hd);
+        //// XZ 平面上の矩形（4頂点）
+        //Vector3 v0 = pos + Vector3(-hw, 0, -hd);
+        //Vector3 v1 = pos + Vector3(hw, 0, -hd);
+        //Vector3 v2 = pos + Vector3(hw, 0, hd);
+        //Vector3 v3 = pos + Vector3(-hw, 0, hd);
 
-        m_primitiveBatch->DrawQuad(
-            VertexPositionColor(v0, col),
-            VertexPositionColor(v1, col),
-            VertexPositionColor(v2, col),
-            VertexPositionColor(v3, col)
-        );
+        //m_primitiveBatch->DrawQuad(
+        //    VertexPositionColor(v0, col),
+        //    VertexPositionColor(v1, col),
+        //    VertexPositionColor(v2, col),
+        //    VertexPositionColor(v3, col)
+        //);
     }
 
     m_primitiveBatch->End();
@@ -1247,34 +1366,50 @@ void Game::Render()
         {
             if (m_judggeEffects[i].timer <= 0.0f) continue;
 
-            ID3D11ShaderResourceView* tex =
-                (m_judggeEffects[i].rank == 0) ? perfectTexture :
-                (m_judggeEffects[i].rank == 1) ? greatTexture : goodTexture;
-            if (!tex) continue;
-
             auto pos3D = judggeCircles[i].GetPosition(now);
-            pos3D.y += 40.0f;   //判定円より上
-            pos3D.z += 40.0f;
+ /*           pos3D.y += 40.0f;
+            pos3D.z += 40.0f;*/
 
             XMVECTOR worldVec = XMLoadFloat3(&pos3D);
             XMVECTOR screenVec = XMVector3Project(
                 worldVec, 0.0f, 0.0f, screenW, screenH, 0.0f, 1.0f, m_proj, m_view, XMMatrixIdentity()
             );
-
             XMFLOAT3 screenPos;
             XMStoreFloat3(&screenPos, screenVec);
             if (screenPos.z >= 1.0f) continue;
 
-            RECT srcRect = { 0,0,128,64 };  //画像サイズに調整
-            DirectX::XMFLOAT2 origin = { 64.0f,32.0f };
+            float age = 1.0f - (m_judggeEffects[i].timer / 0.5f);   //0->1
+            DrawJuddgeBurst(ImGui::GetForegroundDrawList(),
+                ImVec2(screenPos.x, screenPos.y), age, m_judggeEffects[i].rank);
+            //ID3D11ShaderResourceView* tex =
+            //    (m_judggeEffects[i].rank == 0) ? perfectTexture :
+            //    (m_judggeEffects[i].rank == 1) ? greatTexture : goodTexture;
+            //if (!tex) continue;
 
-            //タイマー残量でフェードアウト
-            float alpha = m_judggeEffects[i].timer / 0.5f;
-            DirectX::XMVECTORF32 color = { 1.0f,1.0f,1.0f,alpha };
+            //auto pos3D = judggeCircles[i].GetPosition(now);
+            //pos3D.y += 40.0f;   //判定円より上
+            //pos3D.z += 40.0f;
 
-            spriteBatch->Draw(tex,
-                DirectX::XMFLOAT2(screenPos.x, screenPos.y),
-                &srcRect, color, 0.0f, origin, 1.0f);
+            //XMVECTOR worldVec = XMLoadFloat3(&pos3D);
+            //XMVECTOR screenVec = XMVector3Project(
+            //    worldVec, 0.0f, 0.0f, screenW, screenH, 0.0f, 1.0f, m_proj, m_view, XMMatrixIdentity()
+            //);
+
+            //XMFLOAT3 screenPos;
+            //XMStoreFloat3(&screenPos, screenVec);
+            //if (screenPos.z >= 1.0f) continue;
+
+            ////RECT srcRect = { 0,0,128,64 };  //画像サイズに調整
+            //RECT srcRect = { 0,0,778,247 };  //画像サイズに調整
+            //DirectX::XMFLOAT2 origin = { 64.0f,32.0f };
+
+            ////タイマー残量でフェードアウト
+            //float alpha = m_judggeEffects[i].timer / 0.5f;
+            //DirectX::XMVECTORF32 color = { 1.0f,1.0f,1.0f,alpha };
+
+            //spriteBatch->Draw(tex,
+            //    DirectX::XMFLOAT2(screenPos.x, screenPos.y),
+            //    &srcRect, color, 0.0f, origin, 1.0f);
         }
         spriteBatch->End();
 
@@ -1285,12 +1420,12 @@ void Game::Render()
     }
 
     // ── 3Dモデル描画（note モデルがロードされている場合のみ）────
+    //float now = (bgmstate == BGMstate::play)
+    //    ? musicTime
+    //    : editorBeat * (60.0f / bpm);
+
     if (m_noteModel)
     {
-        float now = (bgmstate == BGMstate::play)
-            ? musicTime
-            : editorBeat * (60.0f / bpm);
-
         for (int i = 0; i < (int)notes.size(); i++)
         {
             const auto& note = notes[i];
@@ -1308,14 +1443,30 @@ void Game::Render()
                 pos = EvaluateNotePosition(note, now);
             }
 
+            DirectX::SimpleMath::Vector3 tint;
+            switch (note.lane)
+            {
+            case 0: tint = { 1.0f, 0.3f, 0.3f }; break; // 赤（S）
+            case 1: tint = { 1.0f, 0.7f, 0.0f }; break; // 橙（D）
+            case 2: tint = { 1.0f, 1.0f, 0.3f }; break; // 黄（F）
+            case 3: tint = { 0.3f, 1.0f, 0.3f }; break; // 緑（J）
+            case 4: tint = { 0.3f, 0.7f, 1.0f }; break; // 青（K）
+            case 5: tint = { 0.7f, 0.3f, 1.0f }; break; // 紫（L）
+            default: tint = { 1.0f, 1.0f, 1.0f }; break;
+            }
+
+            float scale = 10.0f;
             // スケール1.0で配置位置に移動するワールド行列
             DirectX::SimpleMath::Matrix world =
-                DirectX::SimpleMath::Matrix::CreateScale(1.0f) *
+                DirectX::SimpleMath::Matrix::CreateScale(scale) *
+                DirectX::SimpleMath::Matrix::CreateRotationY(3.2f) *
                 DirectX::SimpleMath::Matrix::CreateTranslation(pos);
+
+            m_noteModel->SetTintColor(tint);
             m_noteModel->Draw(context, *m_states, world, m_view, m_proj);
 
             // デバッグ用テキスト（毎フレームノーツ数分表示されるので重い。本番では削除推奨）
-            ImGui::Text("now: %.2f  displayStart: %.2f  et: %.2f", now, st, et);
+            //ImGui::Text("now: %.2f  displayStart: %.2f  et: %.2f", now, st, et);
         }
     }
 

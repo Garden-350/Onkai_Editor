@@ -9,6 +9,7 @@ typedef enum
 	SOUND_LABEL_SE002,
 
 	SOUND_LABEL_BGM001,
+	SOUND_LABEL_BGM002,
 
 	SOUND_LABEL_MAX,
 } SOUND_LABEL;
@@ -32,7 +33,7 @@ private:
 		{"asset/se/メトロノームのチーン.wav", false},
 
 		{"asset/bgm/mirror.wav", true},
-
+		{"asset/bgm/maou_bgm_piano39.wav", true},
 	};
 
 	IXAudio2* m_pXAudio2 = NULL;

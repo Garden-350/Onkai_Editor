@@ -9,6 +9,7 @@
 #include "Note.h"
 #include "json.hpp"
 #include "imgui.h"
+#include "NoteModel.h"
 #include <chrono>
 #include <PrimitiveBatch.h>
 #include <VertexTypes.h>
@@ -160,7 +161,7 @@ private:
     std::unique_ptr<DirectX::PrimitiveBatch<DirectX::VertexPositionColor>> m_yLine;
     std::unique_ptr<DirectX::BasicEffect> m_basicEffect;
     std::unique_ptr<DirectX::CommonStates> m_states;
-    std::unique_ptr<DirectX::Model> m_noteModel;
+    std::unique_ptr<NoteModel> m_noteModel;
     std::unique_ptr<DirectX::IEffectFactory> m_fxFactory;
     Microsoft::WRL::ComPtr<ID3D11InputLayout> m_inputLayout;
 
