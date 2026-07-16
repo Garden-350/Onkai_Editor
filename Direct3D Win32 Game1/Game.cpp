@@ -28,7 +28,10 @@ std::vector<Beams> beams;          // ビームオブジェクト一覧
 
 std::vector<Note>  originalNotes;  // 再生前のノーツ状態を退避しておくバックアップ
 static char filename[64] = "chartname"; // セーブ／ロード時のファイル名バッファ
+static std::string g_chartStatusMessage;    //save/loadの結果メッセ
+static bool g_chartStatusIsError = false;   //成功：false 失敗: true
 NoteType currentNoteType = TAP;    // 現在選択中のノーツ種別
+
 
 int lane;                          // 汎用レーン番号（現在は未使用）
 static float beamLenght = 2.0f;   // ビームの長さ（現在は未使用）
@@ -1641,15 +1644,43 @@ void Game::OnWindowSizeChanged(int width, int height)
 //   出力先: charts/<name>.json
 //   フォーマット:
 //     {
+//       "meta": { "bpm": 120, "totalBeat": 64 },
 //       "notes": [ { lane, type, time, spawnTime, spawnPos, judgePos, path? }, ... ],
-//       "beams": [ { lane, startTime, endTime, warningTime }, ... ]
+//       "beams": [ { lane, startTime, endTime, warningTime }, ... ],
+//       "judgeCircles": [ { "lane": 0, "keyframe": [ {time,x,y,z}, ... ] }, ... ]
 //     }
 // ─────────────────────────────────────────────
+//namespace fs = std::filesystem; // IntelliSenseの誤検知対策も兼ねたエイリアス
 void Game::SaveChart(std::string name)
 {
+    //chartsフォルダがなければ作成
+    std::error_code ec;
+    std::filesystem::create_directories("charts", ec);
+    if (ec)
+    {
+        g_chartStatusMessage = "Save failed: cannot create 'charts' folder";
+        g_chartStatusIsError = true;
+        OutputDebugStringA(("[SaveChart]" + g_chartStatusMessage + "\n").c_str());
+        return;
+    }
     std::ofstream file("charts/" + name + ".json");
-    file << "{\n\"notes\": [\n";
+    if (!file.is_open())
+    {
+        g_chartStatusMessage = "Save failed: cannot open file";
+        g_chartStatusIsError = true;
+        OutputDebugStringA(("[SaveChart]" + g_chartStatusMessage + "\n").c_str());
+        return;
+    }
 
+    file << "{\n";
+    // メタ情報
+    file << "\"meta\":{"
+        << "\"bpm\":" << bpm << ","
+        << "\"totalBeat\":" << totalBeat
+        << "},\n";
+
+    // ノーツ
+    file << "\"notes\":[\n";
     for (size_t i = 0; i < notes.size(); i++)
     {
         file << "{";
@@ -1657,21 +1688,19 @@ void Game::SaveChart(std::string name)
         file << "\"type\":" << notes[i].note << ",";
         file << "\"time\":" << notes[i].time;
 
-        // spawnTime が有効な場合のみ出力
         if (notes[i].spawnTime >= 0.0f)
             file << ",\"spawnTime\":" << notes[i].spawnTime;
 
-        file << ",\"spawnPos\":{"
+        file << ",\"spawnPos\":{"   
             << "\"x\":" << notes[i].spawnPos.x << ","
             << "\"y\":" << notes[i].spawnPos.y << ","
             << "\"z\":" << notes[i].spawnPos.z << "}";
 
-        file << ",\"judgePos\":{"
+        file << ",\"judgePos\":{"   
             << "\"x\":" << notes[i].judgePos.x << ","
             << "\"y\":" << notes[i].judgePos.y << ","
             << "\"z\":" << notes[i].judgePos.z << "}";
 
-        // 制御点がある場合のみ "path" として出力
         if (!notes[i].controlPoints.empty())
         {
             file << ",\"path\":[";
@@ -1679,50 +1708,108 @@ void Game::SaveChart(std::string name)
             {
                 auto& cp = notes[i].controlPoints[p];
                 file << "{\"x\":" << cp.x
-                    << ",\"y\":" << cp.y
+                    << ",\"y\":" << cp.y 
                     << ",\"z\":" << cp.z << "}";
                 if (p != notes[i].controlPoints.size() - 1) file << ",";
             }
             file << "]";
         }
-
         file << "}";
         if (i != notes.size() - 1) file << ",";
         file << "\n";
     }
+    file << "],\n";
 
-    file << "],\n\"beams\":[\n";
+    // ビーム
+    file << "\"beams\":[\n";
     for (size_t i = 0; i < beams.size(); i++)
     {
         file << "{";
         file << "\"lane\":" << beams[i].lane << ",";
         file << "\"startTime\":" << beams[i].startTime << ",";
-        file << "\"endTime\":" << beams[i].endTime << ",";
-        file << "\"warningTime\":" << beams[i].warningTime;
+        file << "\"endTime\":" << beams[i].endTime << ","
+            << "\"warningTime\":" << beams[i].warningTime;
         file << "}";
         if (i != beams.size() - 1) file << ",";
         file << "\n";
     }
-    file << "]\n}\n";
-}
+    file << "],\n";
 
+    // 判定円のキーフレーム
+    file << "\"judgeCircles\":[\n";
+    for (size_t i = 0; i < judggeCircles.size(); i++)
+    {
+        auto& circle = judggeCircles[i];
+        file << "{\"lane\":" << circle.lane << ",\"keyframe\":[";
+        for (size_t k = 0; k < circle.keyframe.size(); k++)
+        {
+            auto& key = circle.keyframe[k];
+            file << "{\"time\":" << key.time
+                << ",\"x\":" << key.x
+                << ",\"y\":" << key.y
+                << ",\"z\":" << key.z << "}";
+            if (k != circle.keyframe.size() - 1) file << ",";
+        }
+        file << "]}";
+        if (i != judggeCircles.size() - 1) file << ",";
+        file << "\n";
+    }
+    file << "]\n}\n";
+
+    file.close();
+
+    if (file.fail())
+    {
+        g_chartStatusMessage = "Save failed: write error";
+        g_chartStatusIsError = true;
+    }
+    else
+    {
+        g_chartStatusMessage = "Saved charts/" + name + ".json (notes:" +
+            std::to_string(notes.size()) + ")";
+        g_chartStatusIsError = false;
+    }
+    OutputDebugStringA(("[SaveChart]" + g_chartStatusMessage + "\n").c_str());
+}
 // ─────────────────────────────────────────────
 // LoadChart : JSON ファイルから譜面を読み込む
 //
 //   spawnPos / judgePos が存在しない旧フォーマットの場合は
 //   レーン番号から自動計算してデフォルト値を設定する。
+//   meta / judgeCircles が無い旧フォーマットも読み込める（後方互換）。
 // ─────────────────────────────────────────────
 void Game::LoadChart(std::string name)
 {
     std::ifstream file("charts/" + name + ".json");
-    if (!file.is_open()) return;
-
+    if (!file.is_open())
+    {
+        g_chartStatusMessage = "Load failed: file not found(charts/" + name + ".json)";
+        g_chartStatusIsError = true;
+        OutputDebugStringA(("[LoadChart]" + g_chartStatusMessage + "\n").c_str());
+        return;
+    }
+    nlohmann::json j;
+    try
+    {
+        file >> j;
+    }
+    catch (const std::exception& e)
+    {
+        g_chartStatusMessage = std::string("Load failed:invalid JSON(") + e.what() + ")";
+        g_chartStatusIsError = true;
+        OutputDebugStringA(("[LoadChart]" + g_chartStatusMessage + "\n").c_str());
+        return;
+    }
     notes.clear();
     beams.clear();
 
-    nlohmann::json j;
-    file >> j;
-
+    //メタ情報(なければ現在地を維持)===============================================================
+    if (j.contains("meta"))
+    {
+        if (j["meta"].contains("bpm")) bpm = j["meta"]["bpm"].get<float>();
+        if (j["meta"].contains("totalBeat")) totalBeat = j["meta"]["totalBeat"].get<float>();
+    }
+    //ノーツ=================================================================
     if (j.contains("notes"))
     {
         for (const auto& n : j["notes"])
@@ -1732,10 +1819,6 @@ void Game::LoadChart(std::string name)
             note.note = static_cast<NoteType>(n["type"].get<int>());
             note.time = n["time"].get<float>();
 
-            if (n.contains("spawnTime"))
-                note.spawnTime = n["spawnTime"].get<float>();
-
-            // spawnPos の読み込み（なければレーンから計算）
             if (n.contains("spawnPos"))
             {
                 note.spawnPos.x = n["spawnPos"]["x"].get<float>();
@@ -1744,12 +1827,10 @@ void Game::LoadChart(std::string name)
             }
             else
             {
-                // 旧フォーマット互換：レーン幅 660 / 6 で均等配置
                 float laneX = -310.0f + (660.0f / 6.0f) * note.lane + (660.0f / 12.0f);
-                note.spawnPos = { laneX, -55.0f, 1000.0f }; // 奥（Z=1000）から出現
+                note.spawnPos = { laneX, -55.0f, 1000.0f };
             }
 
-            // judgePos の読み込み（なければレーンから計算）
             if (n.contains("judgePos"))
             {
                 note.judgePos.x = n["judgePos"]["x"].get<float>();
@@ -1759,10 +1840,9 @@ void Game::LoadChart(std::string name)
             else
             {
                 float laneX = -310.0f + (660.0f / 6.0f) * note.lane + (660.0f / 12.0f);
-                note.judgePos = { laneX, -55.0f, -210.0f }; // 判定ライン（Z=-210）
+                note.judgePos = { laneX, -55.0f, -210.0f };
             }
 
-            // ベジェ制御点の読み込み
             if (n.contains("path"))
             {
                 for (const auto& p : n["path"])
@@ -1774,15 +1854,12 @@ void Game::LoadChart(std::string name)
                     note.controlPoints.emplace_back(v);
                 }
             }
-
             notes.emplace_back(note);
         }
-
-        // 判定時刻で昇順ソート（描画・判定処理の前提）
         std::sort(notes.begin(), notes.end(),
             [](const Note& a, const Note& b) { return a.time < b.time; });
     }
-
+    //ビーム==============================================================
     if (j.contains("beams"))
     {
         for (const auto& b : j["beams"])
@@ -1795,6 +1872,46 @@ void Game::LoadChart(std::string name)
             ));
         }
     }
+    //判定円のキーフレーム===============================================
+    if (j.contains("judgeCircles"))
+    {
+        for (const auto& jc : j["judgeCircles"])
+        {
+            int lane = jc["lane"].get<int>();
+            if (lane < 0 || lane >= (int)judggeCircles.size())continue;
+
+            auto& circle = judggeCircles[lane];
+            circle.keyframe.clear();
+            for (const auto& k : jc["keyframe"])
+            {
+                JudggeCircleframe key;
+                key.time = k["time"].get<float>();
+                key.x = k["x"].get<float>();
+                key.y = k["y"].get<float>();
+                key.z = k["z"].get<float>();
+                circle.keyframe.push_back(key);
+            }
+            std::sort(circle.keyframe.begin(), circle.keyframe.end(),
+                [](const JudggeCircleframe& a, const JudggeCircleframe& b) {
+                    return a.time < b.time;
+                });
+        }
+    }
+    //ロード後の状態リセット
+    sound.Stop(SOUND_LABEL_BGM001);
+    bgmstate = BGMstate::stop;
+    musicTime = 0.0f;
+    editorBeat = 0.0f;
+    success = 0;
+    miss = 0;
+    selectedNoteIndex = -1;
+    m_EditorState = EditorState::IDLE;
+    originalNotes = notes;
+
+    g_chartStatusMessage = "Loaded: charts/" + name + ".json (notes:" +
+        std::to_string(notes.size()) + ")";
+    g_chartStatusIsError = false;
+    OutputDebugStringA(("[LoadChart]" + g_chartStatusMessage + "\n").c_str());
 }
 
 // ─────────────────────────────────────────────

@@ -1,0 +1,17 @@
+{
+"meta" :{"bpm":120,"totalBeat":1000},
+"notes" : [
+{"lane":0,"type":0,"time":1.1,"spawnTime":1"spawnPos":{"x":201.284,"y":-55,"z":303.762}"judgePos":{"x":190,"y":-55,"z":-210},"path":[{"x":12<"y":0<"z":20}]},
+{"lane":5,"type":0,"time":1.1,"spawnTime":1"spawnPos":{"x":84.4688,"y":45,"z":283.502}"judgePos":{"x":-260,"y":-55,"z":-210},"path":[{"x":20<"y":100<"z":1},{"x":-87.7656<"y":-100<"z":36.751}]}
+],
+"beams":[
+],
+"judgeCircles":[
+{"lane":0,"keyframe":[{"time":0,"x":190,"y":-55,"z":-210}]},
+{"lane":1,"keyframe":[{"time":0,"x":100,"y":-55,"z":-210}]},
+{"lane":2,"keyframe":[{"time":0,"x":10,"y":-55,"z":-210}]},
+{"lane":3,"keyframe":[{"time":0,"x":-80,"y":-55,"z":-210}]},
+{"lane":4,"keyframe":[{"time":0,"x":-170,"y":-55,"z":-210}]},
+{"lane":5,"keyframe":[{"time":0,"x":-260,"y":-55,"z":-210}]}
+]
+}
