@@ -10,6 +10,7 @@
 #include "json.hpp"
 #include "imgui.h"
 #include "NoteModel.h"
+#include "FbxModel.h"
 #include <chrono>
 #include <PrimitiveBatch.h>
 #include <VertexTypes.h>
@@ -35,6 +36,13 @@ enum class EditorState
     EDITING,
 };
 
+enum class BeamState
+{
+    Homing,
+    Fired,
+	Resolved
+};
+
 struct Beams {
     int lane;
     float time;
@@ -45,6 +53,20 @@ struct Beams {
     Beams(int l, float start, float end, float warning)
         : lane(l), startTime(start), endTime(end), warningTime(warning) {
     }
+};
+
+struct HomingBeam {
+    //jsonに保存するデータ群
+    float chargeTime = 0.0f;    //警告開始
+	float lockTime = 0.0f;      //差表確定・発射
+	float hitTime = 0.0f;       //着弾判定
+
+    //実行時に計算する値
+	int lockedSide = 0;        //ロックした側のレーン（-1=左,　0=中央, 1=右）
+    DirectX::SimpleMath::Vector3 lockedPos;
+	BeamState state = BeamState::Homing;
+	bool chargeSoundPlayerd = false;
+	bool fireSoundPlayed = false;
 };
 
 struct JudggeCircleframe {
@@ -156,12 +178,15 @@ private:
     Sound sound;
     std::string name;
     std::chrono::steady_clock::time_point musicStartTime;
+	std::vector<HomingBeam> homingBeams;
 
     std::unique_ptr<DirectX::PrimitiveBatch<DirectX::VertexPositionColor>> m_primitiveBatch;
     std::unique_ptr<DirectX::PrimitiveBatch<DirectX::VertexPositionColor>> m_yLine;
     std::unique_ptr<DirectX::BasicEffect> m_basicEffect;
     std::unique_ptr<DirectX::CommonStates> m_states;
     std::unique_ptr<NoteModel> m_noteModel;
+	std::unique_ptr<FbxModel> m_playerModel;
+	std::unique_ptr<FbxModel> m_enemyModel;
     std::unique_ptr<DirectX::IEffectFactory> m_fxFactory;
     Microsoft::WRL::ComPtr<ID3D11InputLayout> m_inputLayout;
 
@@ -201,6 +226,17 @@ private:
     float chartPosX = 0.0f;
     float currentBeat = 0.0f;
     float m_PlacementHeight = -55.0f; // 配置基準面のY座標(上下方法は後々)
+
+    //ビーム配置UI用の一時入力値
+    float m_newBeamChargeTime = 0.0f;
+	float m_newBeamLockTime = 1.0f;
+	float m_newBeamHitTime = 1.5f;
+    //ビームが出るところ（今は敵の位置から）
+	DirectX::SimpleMath::Vector3 enemyPos = { 0.0f, 50.0f, 500.0f };
+    //クワッド描画用ヘルパー関数　宣言
+    void DrawThickBeam(const DirectX::SimpleMath::Vector3& from,
+        const DirectX::SimpleMath::Vector3& to,
+        float thickness, DirectX::XMVECTORF32 color);
 
     DirectX::SimpleMath::Vector3 cameraPos = { 0.0f, -800.0f, -200.0f };
     // レーン中心(X=0)、判定ラインZ=-210〜出現Z=1000あたりの中間くらいの高さで側面から
@@ -279,6 +315,12 @@ private:
     ID3D11ShaderResourceView* greatTexture;
     ID3D11ShaderResourceView* goodTexture;
     ID3D11ShaderResourceView* missTexture;
+
+    //プレイヤーの関連値
+    int   playerSide = 0;      // -1:左 / +1:右（判定用、即時反映）
+    float playerSideBlend = 1.0f; // 見た目補間用（-1.0〜+1.0）
+    DirectX::SimpleMath::Vector3 playerBasePos = { 0.0f, -100.0f, -400.0f }; // 基準位置
+    float playerMoveRange = 70.0f; // 左右移動の振れ幅
 
     void Update(DX::StepTimer const& timer);
     void Render();

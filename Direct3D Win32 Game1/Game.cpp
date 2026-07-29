@@ -19,6 +19,9 @@ extern void ExitGame() noexcept;
 #include <cstdint>
 #include <filesystem>
 #include <SpriteBatch.h>
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
 
 // ─────────────────────────────────────────────
 // グローバル変数
@@ -328,6 +331,19 @@ void Game::Initialize(HWND window, int width, int height)
         m_noteModel.reset();    //失敗時はnullptrに戻す
     }
 
+	m_playerModel = std::make_unique<FbxModel>();
+    if(!m_playerModel->Load(dev,L"asset/Model/Player/player.fbx", L"asset/Model/Player"))
+    {
+        OutputDebugStringW(L"[Game] PlayerModel load failed\n");
+        m_playerModel.reset();
+	}
+    m_enemyModel = std::make_unique<FbxModel>();
+    if (!m_enemyModel->Load(dev, L"asset/Model/Enemy/enemy.fbx", L"asset/Model/Enemy"))
+    {
+        OutputDebugStringW(L"[Game] EnemyModel load failed\n");
+        m_enemyModel.reset();
+    }
+
     // ※ 3Dモデルのロード情報（現在は未使用）
     //struct Load3DInfo {
     //    std::string filename;
@@ -426,6 +442,14 @@ void Game::Update(DX::StepTimer const& timer)
     // Z で ON（左右レーン反転）、X で OFF
     if (GetAsyncKeyState('Z') & 0x0001) mirrorMode = true;
     if (GetAsyncKeyState('X') & 0x0001 && mirrorMode == true) mirrorMode = false;
+
+    //ずっと動くのいやだからビームが来る何フレームか前だけ動けるとかにした方がいいかも
+    if (GetAsyncKeyState('S') & 0x8000 || GetAsyncKeyState('D') & 0x8000 || GetAsyncKeyState('F') & 0x8000)
+        playerSide = 1;
+    else if (GetAsyncKeyState('J') & 0x8000 || GetAsyncKeyState('K') & 0x8000 || GetAsyncKeyState('L') & 0x8000)
+        playerSide = -1;
+    else
+        playerSide = 0;
 
     // ロングノーツの判定間隔スライダー（ImGui UI）
     ImGui::SliderFloat("Long Interval", &LongInterval, 0.03f, 0.5f);
@@ -624,6 +648,44 @@ void Game::Update(DX::StepTimer const& timer)
             break;
         }
     }
+
+    //ビームの状態遷移ロジック
+    if(bgmstate == BGMstate::play)
+    {
+        for (auto& beam : homingBeams)
+        {
+            if(!beam.chargeSoundPlayerd && musicTime >= beam.chargeTime)
+            {
+                //ここで音を流す
+                //sound.Play(SOUND_LABEL_CHARGE);
+                beam.chargeSoundPlayerd = true;
+			}
+
+            if (beam.state == BeamState::Homing)
+            {
+                beam.lockedSide = playerSide;
+                beam.lockedPos = playerBasePos;
+                beam.lockedPos.x += playerSide * playerMoveRange;
+
+                if (musicTime >= beam.lockTime)
+                {
+                    //sound.Play();
+					beam.fireSoundPlayed = true;
+                    beam.state = BeamState::Fired;
+                }
+            }
+            else if (beam.state == BeamState::Fired)
+            {
+                if (musicTime >= beam.hitTime)
+                {
+					bool dodged = (playerSide != beam.lockedSide);
+                    if (dodged) success++;  //判定変えたかったら変えてね
+					else miss++;
+                    beam.state = BeamState::Resolved;
+                }
+            }
+        }
+	}
 
     //ミス判定
     for (int i = (int)notes.size() - 1; i >= 0; i--)
@@ -943,6 +1005,43 @@ void Game::Render()
             }
         }
 
+        //ビーム描画
+		ImGui::SeparatorText("Homing Beams");
+        for(int i = 0; i <(int)homingBeams.size(); i++)
+        {
+			ImGui::PushID(i);   // ユニークIDをプッシュ
+			auto& b = homingBeams[i];
+            const char* stateStr =
+                b.state == BeamState::Homing ? "Homing" :
+                b.state == BeamState::Fired ? "Fired" : "Resolved";
+            ImGui::Text("Beam %d [%s]", i, stateStr);
+            ImGui::SliderFloat("charge", &b.chargeTime, 0.0f, 60.0f);
+            ImGui::SliderFloat("lock", &b.lockTime, 0.0f, 60.0f);
+            ImGui::SliderFloat("hit", &b.hitTime, 0.0f, 60.0f);
+            if (ImGui::Button("Delete"))
+            {
+                homingBeams.erase(homingBeams.begin() + i);
+                ImGui::PopID();
+                break;
+            }
+            ImGui::PopID();
+		}
+
+        ImGui::Spacing();
+		ImGui::InputFloat("New Charge", &m_newBeamChargeTime, 0.1f);
+        ImGui::InputFloat("New Lock", &m_newBeamLockTime, 0.1f);
+        ImGui::InputFloat("New Hit", &m_newBeamHitTime, 0.1f);
+        if (ImGui::Button("+ Add Beam", ImVec2(-1, 0)))
+        {
+            HomingBeam b;
+            b.chargeTime = m_newBeamChargeTime;
+            b.lockTime = m_newBeamLockTime;
+            b.hitTime = m_newBeamHitTime;
+            homingBeams.push_back(b);
+
+            std::sort(homingBeams.begin(), homingBeams.end(),
+                [](const HomingBeam& a, const HomingBeam& c) { return a.lockTime < c.lockTime; });
+        }
 
         // ── 選択中ノーツのプロパティ編集 ──────────
         ImGui::SeparatorText("Selected Note");
@@ -1258,6 +1357,22 @@ void Game::Render()
         }
     }
 
+    Vector3 beamOrigin = enemyPos + Vector3(0.0f, 50.0f, 0.0f);
+    for (auto& beam : homingBeams)
+    {
+		if (beam.state == BeamState::Resolved) continue;    // 解決済みは描画しない
+		if (musicTime < beam.chargeTime) continue;          // チャージ前は描画しない
+
+        Vector3 from = beamOrigin;
+        Vector3 to = (beam.state == BeamState::Homing) ? 
+            (playerBasePos + Vector3(playerSide * playerMoveRange, 0, 0)) : beam.lockedPos;
+
+        XMVECTORF32 col = (beam.state == BeamState::Homing) ? Colors::Orange : Colors::Red;
+		float thickness = (beam.state == BeamState::Homing) ? 6.0f : 14.0f; // ホーミング中は細く、ロック後は太く描画
+
+		DrawThickBeam(from, to, thickness, col);    // ビーム描画
+    }
+
     // ── ノーツ本体をカラーつきクワッドで描画 ────────
     //   再生中は EvaluateNotePosition で移動位置を計算し表示。
     //   停止中は spawnPos に固定表示する。
@@ -1363,6 +1478,31 @@ void Game::Render()
                 origin, //画像の中心を基準に
                 size / 128.0f   //スケール
             );
+        }
+
+        for (auto& beam : homingBeams)
+        {
+            if (beam.state != BeamState::Homing) continue;
+            if (musicTime < beam.chargeTime) continue;
+
+            float remain = beam.lockTime - musicTime;
+            float total = beam.lockTime - beam.chargeTime;
+            if (total < 0.01f) total = 0.01f;
+            float ratio = std::clamp(remain / total, 0.0f, 1.0f);
+
+            Vector3 targetPos = playerBasePos;
+            targetPos.x += playerSide * playerMoveRange;
+
+            XMVECTOR worldVec = XMLoadFloat3(&targetPos);
+            XMVECTOR screenVec = XMVector3Project(
+                worldVec, 0.0f, 0.0f, screenW, screenH, 0.0f, 1.0f, m_proj, m_view, XMMatrixIdentity());
+            XMFLOAT3 screenPos;
+            XMStoreFloat3(&screenPos, screenVec);
+            if (screenPos.z >= 1.0f) continue;
+
+            ImU32 col = IM_COL32((int)(255 * (1.0f - ratio)), (int)(255 * ratio), 60, 220);
+            ImGui::GetForegroundDrawList()->AddCircle(
+                ImVec2(screenPos.x, screenPos.y), 25.0f * ratio + 8.0f, col, 32, 3.0f);
         }
 
         for (int i = 0; i < 6; i++)
@@ -1471,6 +1611,23 @@ void Game::Render()
             // デバッグ用テキスト（毎フレームノーツ数分表示されるので重い。本番では削除推奨）
             //ImGui::Text("now: %.2f  displayStart: %.2f  et: %.2f", now, st, et);
         }
+    }
+
+    //プレイヤー表示
+    if (m_playerModel)
+    {
+        Vector3 pos = playerBasePos;
+        pos.x += playerSide * playerMoveRange;
+
+        Matrix world = Matrix::CreateScale(0.06f) * Matrix::CreateRotationX(1.5f) * Matrix::CreateTranslation(pos);
+        m_playerModel->Draw(context, *m_states, world, m_view, m_proj);
+    }
+
+    //敵表示
+    if (m_enemyModel)
+    {
+        Matrix world = Matrix::CreateScale(0.2f) * Matrix::CreateRotationX(1.5f) * Matrix::CreateRotationY(3.14f) * Matrix::CreateTranslation(enemyPos);
+        m_enemyModel->Draw(context, *m_states, world, m_view, m_proj);
     }
 
     // ════════════════════════════════════════════
@@ -2292,6 +2449,34 @@ void Game::GetDefaultSize(int& width, int& height) const noexcept
 {
     width = 1920;
     height = 1080;
+}
+
+// DrawThickBeam : from→to を結ぶ、太さ指定可能なビームをクワッドで描画
+// カメラ方向を基準に垂直な面を作ることで、常にカメラ側を向く
+void Game::DrawThickBeam(const DirectX::SimpleMath::Vector3& from, const DirectX::SimpleMath::Vector3& to, float thickness, DirectX::XMVECTORF32 color)
+{
+	Vector3 dir = to - from;
+    float len = dir.Length();
+	if (len < 0.01f) return; // 長さがほぼゼロなら描画しない
+	dir.Normalize();
+
+	Vector3 toCam = m_camPos - from;
+	Vector3 side = dir.Cross(toCam);    // ビーム方向とカメラ方向の外積で垂直ベクトルを求める
+	if (side.LengthSquared() < 0.0001f) side = Vector3::Up; // 外積がほぼゼロなら上方向を代用
+	side.Normalize();
+	side *= thickness * 0.5f;   // ビームの半分の厚さ
+
+	Vector3 v0 = from - side; // クワッドの4頂点
+	Vector3 v1 = from + side;
+	Vector3 v2 = to + side;
+	Vector3 v3 = to - side;
+
+	m_primitiveBatch->DrawQuad( // 4頂点のクワッドを描画
+        VertexPositionColor(v0, color),
+        VertexPositionColor(v1, color),
+        VertexPositionColor(v2, color),
+        VertexPositionColor(v3, color)
+	);
 }
 
 #pragma region Direct3D Resources

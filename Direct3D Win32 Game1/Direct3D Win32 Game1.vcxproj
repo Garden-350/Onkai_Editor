@@ -184,6 +184,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="DeviceResources.h" />
+    <ClInclude Include="FbxModel.h" />
     <ClInclude Include="Game.h" />
     <ClInclude Include="ImGui\imconfig.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
@@ -221,6 +222,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DeviceResources.cpp" />
+    <ClCompile Include="FbxModel.cpp" />
     <ClCompile Include="Game.cpp">
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\mawar\source\repos\Direct3D Win32 Game1\Direct3D Win32 Game1\ImGui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>

@@ -54,6 +54,7 @@
       <Filter>Assets</Filter>
     </ClInclude>
     <ClInclude Include="NoteModel.h" />
+    <ClInclude Include="FbxModel.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp" />
@@ -89,6 +90,7 @@
     <ClCompile Include="Note.cpp" />
     <ClCompile Include="sound.cpp" />
     <ClCompile Include="NoteModel.cpp" />
+    <ClCompile Include="FbxModel.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="resource.rc" />
