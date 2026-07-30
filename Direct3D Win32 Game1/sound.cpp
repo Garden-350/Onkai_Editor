@@ -1,5 +1,13 @@
 #include "pch.h"
 #include "sound.h"
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
+#include <algorithm>
+#include <mferror.h>
+#pragma comment(lib, "mfplat.lib")
+#pragma comment(lib, "mfreadwrite.lib")
+#pragma comment(lib, "mfuuid.lib")
 
 #ifdef _XBOX //Big-Endian
 #define fourccRIFF 'RIFF'
@@ -37,6 +45,14 @@ HRESULT Sound::Init()
 		return -1;
 	}
 
+	//Media Foundationの初期か
+	hr = MFStartup(MF_VERSION);
+	if (FAILED(hr))
+	{
+		CoUninitialize();
+		return -1;
+	}
+
 	/**** Create XAudio2 ****/
 	hr = XAudio2Create(&m_pXAudio2, 0);		// 第二引数は､動作フラグ デバッグモードの指定(現在は未使用なので0にする)
 	//hr=XAudio2Create(&g_pXAudio2, 0, XAUDIO2_DEFAULT_PROCESSOR);		// 第三引数は、windowsでは無視
@@ -60,39 +76,58 @@ HRESULT Sound::Init()
 		memset(&m_wfx[i], 0, sizeof(WAVEFORMATEXTENSIBLE));
 		memset(&m_buffer[i], 0, sizeof(XAUDIO2_BUFFER));
 
-		hFile = CreateFileA(m_param[i].filename, GENERIC_READ, FILE_SHARE_READ, NULL,
-			OPEN_EXISTING, 0, NULL);
-		if (hFile == INVALID_HANDLE_VALUE) {
-			return HRESULT_FROM_WIN32(GetLastError());
+		std::string path = m_param[i].filename;
+		std::string ext = path.substr(path.find_last_of(".") + 1);
+		for (auto& c : ext) c = (char)tolower((unsigned char)c);
+
+		if (ext == "mp3")
+		{
+			//mp3の場合:Media Foundation経由でPCMデコード
+			DWORD dataSize = 0;
+			hr = LoadMp3AsPCM(m_param[i].filename, m_wfx[i], m_DataBuffer[i], dataSize);
+			if (FAILED(hr)) return hr;
+
+			m_buffer[i].AudioBytes = dataSize;
+			m_buffer[i].pAudioData = m_DataBuffer[i];
+			m_buffer[i].Flags = XAUDIO2_END_OF_STREAM;
+			m_buffer[i].LoopCount = m_param[i].bLoop ? XAUDIO2_LOOP_INFINITE : 0;
 		}
-		if (SetFilePointer(hFile, 0, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER) {
-			return HRESULT_FROM_WIN32(GetLastError());
-		}
-
-		//check the file type, should be fourccWAVE or 'XWMA'
-		FindChunk(hFile, fourccRIFF, dwChunkSize, dwChunkPosition);
-		ReadChunkData(hFile, &filetype, sizeof(DWORD), dwChunkPosition);
-		if (filetype != fourccWAVE)		return S_FALSE;
-
-		FindChunk(hFile, fourccFMT, dwChunkSize, dwChunkPosition);
-		ReadChunkData(hFile, &m_wfx[i], dwChunkSize, dwChunkPosition);
-
-		//fill out the audio data buffer with the contents of the fourccDATA chunk
-		FindChunk(hFile, fourccDATA, dwChunkSize, dwChunkPosition);
-		m_DataBuffer[i] = new BYTE[dwChunkSize];
-		ReadChunkData(hFile, m_DataBuffer[i], dwChunkSize, dwChunkPosition);
-
-		CloseHandle(hFile);
-
-		// 	サブミットボイスで利用するサブミットバッファの設定
-		m_buffer[i].AudioBytes = dwChunkSize;
-		m_buffer[i].pAudioData = m_DataBuffer[i];
-		m_buffer[i].Flags = XAUDIO2_END_OF_STREAM;
-		if (m_param[i].bLoop)
-			m_buffer[i].LoopCount = XAUDIO2_LOOP_INFINITE;
 		else
-			m_buffer[i].LoopCount = 0;
+		{
+			//wavの場合
+			hFile = CreateFileA(m_param[i].filename, GENERIC_READ, FILE_SHARE_READ, NULL,
+				OPEN_EXISTING, 0, NULL);
+			if (hFile == INVALID_HANDLE_VALUE) {
+				return HRESULT_FROM_WIN32(GetLastError());
+			}
+			if (SetFilePointer(hFile, 0, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER) {
+				return HRESULT_FROM_WIN32(GetLastError());
+			}
 
+			//check the file type, should be fourccWAVE or 'XWMA'
+			FindChunk(hFile, fourccRIFF, dwChunkSize, dwChunkPosition);
+			ReadChunkData(hFile, &filetype, sizeof(DWORD), dwChunkPosition);
+			if (filetype != fourccWAVE)		return S_FALSE;
+
+			FindChunk(hFile, fourccFMT, dwChunkSize, dwChunkPosition);
+			ReadChunkData(hFile, &m_wfx[i], dwChunkSize, dwChunkPosition);
+
+			//fill out the audio data buffer with the contents of the fourccDATA chunk
+			FindChunk(hFile, fourccDATA, dwChunkSize, dwChunkPosition);
+			m_DataBuffer[i] = new BYTE[dwChunkSize];
+			ReadChunkData(hFile, m_DataBuffer[i], dwChunkSize, dwChunkPosition);
+
+			CloseHandle(hFile);
+
+			// 	サブミットボイスで利用するサブミットバッファの設定
+			m_buffer[i].AudioBytes = dwChunkSize;
+			m_buffer[i].pAudioData = m_DataBuffer[i];
+			m_buffer[i].Flags = XAUDIO2_END_OF_STREAM;
+			if (m_param[i].bLoop)
+				m_buffer[i].LoopCount = XAUDIO2_LOOP_INFINITE;
+			else
+				m_buffer[i].LoopCount = 0;
+		}
 		m_pXAudio2->CreateSourceVoice(&m_pSourceVoice[i], &(m_wfx[i].Format));
 	}
 
@@ -119,6 +154,8 @@ void Sound::Uninit(void)
 	if(m_pMasteringVoice)m_pMasteringVoice->DestroyVoice();
 
 	if (m_pXAudio2) m_pXAudio2->Release();
+
+	MFShutdown();
 
 	// COMの破棄
 	CoUninitialize();
@@ -271,4 +308,69 @@ HRESULT Sound::ReadChunkData(HANDLE hFile, void* buffer, DWORD buffersize, DWORD
 	if (0 == ReadFile(hFile, buffer, buffersize, &dwRead, NULL))
 		hr = HRESULT_FROM_WIN32(GetLastError());
 	return hr;
+}
+
+HRESULT Sound::LoadMp3AsPCM(LPCSTR filename, WAVEFORMATEXTENSIBLE& outWfx, BYTE*& outData, DWORD& outSize)
+{
+	HRESULT hr = S_OK;
+
+	// ファイルパスをワイド文字列に変換
+	wchar_t wpath[MAX_PATH];
+	MultiByteToWideChar(CP_UTF8, 0, filename, -1, wpath, MAX_PATH);
+
+	IMFSourceReader* pReader = nullptr;
+	hr = MFCreateSourceReaderFromURL(wpath, nullptr, &pReader);
+	if (FAILED(hr)) return hr;
+
+	// 出力フォーマットをPCM(非圧縮)に指定する
+	IMFMediaType* pPCMType = nullptr;
+	MFCreateMediaType(&pPCMType);
+	pPCMType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+	pPCMType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
+	pReader->SetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, pPCMType);
+
+	// 実際に決定されたフォーマットを取得
+	IMFMediaType* pActualType = nullptr;
+	pReader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, &pActualType);
+
+	WAVEFORMATEX* pWfx = nullptr;
+	UINT32 wfxSize = 0;
+	MFCreateWaveFormatExFromMFMediaType(pActualType, &pWfx, &wfxSize);
+	memcpy(&outWfx, pWfx, std::min(sizeof(WAVEFORMATEXTENSIBLE), (size_t)wfxSize));
+	CoTaskMemFree(pWfx);
+
+	// サンプルを1つずつ読み込んでPCMデータを連結していく
+	std::vector<BYTE> pcmData;
+	while (true)
+	{
+		DWORD flags = 0;
+		IMFSample* pSample = nullptr;
+		hr = pReader->ReadSample((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+			0, nullptr, &flags, nullptr, &pSample);
+		if (FAILED(hr)) break;
+		if (flags & MF_SOURCE_READERF_ENDOFSTREAM) break;
+		if (!pSample) continue;
+
+		IMFMediaBuffer* pBuffer = nullptr;
+		pSample->ConvertToContiguousBuffer(&pBuffer);
+
+		BYTE* pAudioData = nullptr;
+		DWORD dataLen = 0;
+		pBuffer->Lock(&pAudioData, nullptr, &dataLen);
+		pcmData.insert(pcmData.end(), pAudioData, pAudioData + dataLen);
+		pBuffer->Unlock();
+
+		pBuffer->Release();
+		pSample->Release();
+	}
+
+	outSize = (DWORD)pcmData.size();
+	outData = new BYTE[outSize];
+	memcpy(outData, pcmData.data(), outSize);
+
+	pActualType->Release();
+	pPCMType->Release();
+	pReader->Release();
+
+	return S_OK;
 }

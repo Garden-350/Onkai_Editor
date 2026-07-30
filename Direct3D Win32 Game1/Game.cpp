@@ -451,6 +451,19 @@ void Game::Update(DX::StepTimer const& timer)
     else
         playerSide = 0;
 
+    //移動の補間
+    {
+        float targetX = playerSide * playerMoveRange;
+        float diff = targetX - playerVisualX;
+
+        float maxStep = playerMoveSpeed * elapsedTime;  //このフレームで動ける最大距離
+
+        if (fabs(diff) <= maxStep)
+            playerVisualX = targetX;    //目標に十分近ければ合わせる
+        else
+            playerVisualX += (diff > 0.0f ? maxStep : -maxStep);
+    }
+
     // ロングノーツの判定間隔スライダー（ImGui UI）
     ImGui::SliderFloat("Long Interval", &LongInterval, 0.03f, 0.5f);
 
@@ -649,28 +662,59 @@ void Game::Update(DX::StepTimer const& timer)
         }
     }
 
-    //ビームの状態遷移ロジック
-    if(bgmstate == BGMstate::play)
+    if (bgmstate == BGMstate::play)
     {
         for (auto& beam : homingBeams)
         {
-            if(!beam.chargeSoundPlayerd && musicTime >= beam.chargeTime)
+            // ── タンタンタン：chargeTime~lockTimeを3等分した時刻に鳴らす ──
             {
-                //ここで音を流す
-                //sound.Play(SOUND_LABEL_CHARGE);
-                beam.chargeSoundPlayerd = true;
-			}
+                float total = beam.lockTime - beam.chargeTime;
+                if (total < 0.01f) total = 0.01f;
+                float beatInterval = total / HomingBeam::kSearchBeatCount;
+
+                while (beam.searchBeatsPlayed < HomingBeam::kSearchBeatCount)
+                {
+                    float beatTime = beam.chargeTime + beatInterval * beam.searchBeatsPlayed;
+                    if (musicTime >= beatTime)
+                    {
+                        sound.Play(SOUND_BEAM_SARCH); // タン
+                        beam.searchBeatsPlayed++;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+            }
 
             if (beam.state == BeamState::Homing)
             {
-                beam.lockedSide = playerSide;
-                beam.lockedPos = playerBasePos;
-                beam.lockedPos.x += playerSide * playerMoveRange;
+                // ── カン：タンを3回鳴らし終えた瞬間に即ロック確定 ──
+                if (!beam.judgmentLocked && beam.searchBeatsPlayed >= HomingBeam::kSearchBeatCount)
+                {
+                    beam.judgmentLocked = true;
+                    if (!beam.lockSoundPlayed)
+                    {
+                        sound.Play(SOUND_BEAM_DECITION); // カン
+                        beam.lockSoundPlayed = true;
+                    }
+                }
+
+                // ロックされるまでは通常通りプレイヤーを追従
+                if (!beam.judgmentLocked)
+                {
+                    beam.lockedSide = playerSide;
+                    beam.lockedPos = playerBasePos;
+                    beam.lockedPos.x += playerSide * playerMoveRange;
+                }
 
                 if (musicTime >= beam.lockTime)
                 {
-                    //sound.Play();
-					beam.fireSoundPlayed = true;
+                    if (!beam.fireSoundPlayed)
+                    {
+                        sound.Play(SOUND_BEAM_FIRING);
+                        beam.fireSoundPlayed = true;
+                    }
                     beam.state = BeamState::Fired;
                 }
             }
@@ -678,14 +722,70 @@ void Game::Update(DX::StepTimer const& timer)
             {
                 if (musicTime >= beam.hitTime)
                 {
-					bool dodged = (playerSide != beam.lockedSide);
-                    if (dodged) success++;  //判定変えたかったら変えてね
-					else miss++;
+                    bool dodged = (playerSide != beam.lockedSide);
+                    if (dodged) success++;
+                    else miss++;
                     beam.state = BeamState::Resolved;
                 }
             }
         }
-	}
+    }
+    //ビームの状態遷移ロジック
+ //   if(bgmstate == BGMstate::play)
+ //   {
+ //       for (auto& beam : homingBeams)
+ //       {
+ //           if(!beam.chargeSoundPlayerd && musicTime >= beam.chargeTime)
+ //           {
+ //               sound.Play(SOUND_BEAM_SARCH);   //探してる時の効果音
+ //               beam.chargeSoundPlayerd = true;
+	//		}
+
+ //           if (beam.state == BeamState::Homing)
+ //           {
+ //               //早期ロック地点をまだ迎えてなかったら通常通り追従
+ //               if (!beam.judgmentLocked)
+ //               {
+ //                   float earlyLockTime = beam.chargeTime + (beam.lockTime - beam.chargeTime) * HomingBeam::kEarlyLockRatio;
+
+ //                   beam.lockedSide = playerSide;
+ //                   beam.lockedPos = playerBasePos;
+ //                   beam.lockedPos.x += playerSide * playerMoveRange;
+
+ //                   if (musicTime >= earlyLockTime)
+ //                   {
+ //                       beam.judgmentLocked = true; // これ以降、lockedSide/lockedPosは固定される
+
+ //                       if (!beam.lockSoundPlayed)
+ //                       {
+ //                           sound.Play(SOUND_BEAM_DECITION);    //打つ場所が確定した時の効果音
+ //                           beam.lockSoundPlayed = true;
+ //                       }
+ //                   }
+ //               }
+
+ //               if (musicTime >= beam.lockTime)
+ //               {
+ //                   if (!beam.fireSoundPlayed)
+ //                   {
+ //                       sound.Play(SOUND_BEAM_FIRING);
+ //                       beam.fireSoundPlayed = true;
+ //                   }
+ //                   beam.state = BeamState::Fired;
+ //               }
+ //           }
+ //           else if (beam.state == BeamState::Fired)
+ //           {
+ //               if (musicTime >= beam.hitTime)
+ //               {
+	//				bool dodged = (playerSide != beam.lockedSide);
+ //                   if (dodged) success++;  //判定変えたかったら変えてね
+	//				else miss++;
+ //                   beam.state = BeamState::Resolved;
+ //               }
+ //           }
+ //       }
+	//}
 
     //ミス判定
     for (int i = (int)notes.size() - 1; i >= 0; i--)
@@ -1028,15 +1128,16 @@ void Game::Render()
 		}
 
         ImGui::Spacing();
-		ImGui::InputFloat("New Charge", &m_newBeamChargeTime, 0.1f);
-        ImGui::InputFloat("New Lock", &m_newBeamLockTime, 0.1f);
-        ImGui::InputFloat("New Hit", &m_newBeamHitTime, 0.1f);
+		ImGui::InputFloat("New Charge", &m_newBeamChargeTime, 0.01f);
+        ImGui::InputFloat("New Lock", &m_newBeamLockTime, 0.01f);
+        ImGui::InputFloat("New Hit", &m_newBeamHitTime, 0.01f);
         if (ImGui::Button("+ Add Beam", ImVec2(-1, 0)))
         {
             HomingBeam b;
             b.chargeTime = m_newBeamChargeTime;
             b.lockTime = m_newBeamLockTime;
             b.hitTime = m_newBeamHitTime;
+            InitBeamScatter(b); //ビームの周りにあるビーム
             homingBeams.push_back(b);
 
             std::sort(homingBeams.begin(), homingBeams.end(),
@@ -1280,7 +1381,7 @@ void Game::Render()
         );
     }
 
-    // ── 各ノーツのパス・マーカー描画 ─────────────
+    // 各ノーツのパス・マーカー描画 
     for (int i = 0; i < (int)notes.size(); i++)
     {
         auto& note = notes[i];
@@ -1357,21 +1458,56 @@ void Game::Render()
         }
     }
 
+    //ビーム描画
+    context->OMSetBlendState(m_states->Additive(), nullptr, 0xFFFFFFFF);
     Vector3 beamOrigin = enemyPos + Vector3(0.0f, 50.0f, 0.0f);
+
     for (auto& beam : homingBeams)
     {
-		if (beam.state == BeamState::Resolved) continue;    // 解決済みは描画しない
-		if (musicTime < beam.chargeTime) continue;          // チャージ前は描画しない
+        if (beam.state == BeamState::Resolved) continue;
+        if (musicTime < beam.chargeTime) continue;
 
-        Vector3 from = beamOrigin;
-        Vector3 to = (beam.state == BeamState::Homing) ? 
-            (playerBasePos + Vector3(playerSide * playerMoveRange, 0, 0)) : beam.lockedPos;
+        //Vector3 lockTarget = playerBasePos + Vector3(playerSide * playerMoveRange, 0, 0);
+        Vector3 lockTarget = beam.judgmentLocked
+            ? beam.lockedPos                                                    //ロック済みならそこへ収束
+            : (playerBasePos + Vector3(playerVisualX, 0, 0));    //まだならプレイヤーを追従
 
-        XMVECTORF32 col = (beam.state == BeamState::Homing) ? Colors::Orange : Colors::Red;
-		float thickness = (beam.state == BeamState::Homing) ? 6.0f : 14.0f; // ホーミング中は細く、ロック後は太く描画
+        if (beam.state == BeamState::Homing)
+        {
+            // ── 収束進行度 t(0=バラバラ, 1=収束完了) ──
+            float total = beam.lockTime - beam.chargeTime;
+            if (total < 0.01f) total = 0.01f;
+            float t = std::clamp((musicTime - beam.chargeTime) / total, 0.0f, 1.0f);
+            float easedT = t * t; // ease-inで後半に収束を加速
 
-		DrawThickBeam(from, to, thickness, col);    // ビーム描画
+            // ── 散らばった候補線を描画。tが進むほどlockTargetへ寄っていく ──
+            for (int i = 0; i < HomingBeam::kScatterCount; i++)
+            {
+                Vector3 scatterPos = lockTarget + beam.scatterOffsets[i];
+                Vector3 to = LerpVector3(scatterPos, lockTarget, easedT);
+
+                float thicknessFrom = 1.5f;
+                float thicknessTo = 2.0f + easedT * 6.0f;
+
+                XMVECTORF32 coreColor = { 1.0f, 0.9f, 0.6f, 0.9f };
+                XMVECTORF32 glowColor = { 1.0f, 0.5f, 0.1f, 0.35f };
+
+                DrawThickBeam(beamOrigin, to, thicknessFrom, thicknessTo, coreColor, glowColor);
+            }
+        }
+        else // Fired
+        {
+            float thicknessFrom = 4.0f;
+            float thicknessTo = 26.0f;
+
+            XMVECTORF32 coreColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+            XMVECTORF32 glowColor = { 1.0f, 0.15f, 0.15f, 0.6f };
+
+            DrawThickBeam(beamOrigin, beam.lockedPos, thicknessFrom, thicknessTo, coreColor, glowColor);
+        }
     }
+    //ブレンドステートを元に戻す
+    context->OMSetBlendState(m_states->Opaque(), nullptr, 0xFFFFFFFF);
 
     // ── ノーツ本体をカラーつきクワッドで描画 ────────
     //   再生中は EvaluateNotePosition で移動位置を計算し表示。
@@ -1485,10 +1621,10 @@ void Game::Render()
             if (beam.state != BeamState::Homing) continue;
             if (musicTime < beam.chargeTime) continue;
 
-            float remain = beam.lockTime - musicTime;
-            float total = beam.lockTime - beam.chargeTime;
-            if (total < 0.01f) total = 0.01f;
-            float ratio = std::clamp(remain / total, 0.0f, 1.0f);
+            //float remain = beam.lockTime - musicTime;
+            //float total = beam.lockTime - beam.chargeTime;
+            //if (total < 0.01f) total = 0.01f;
+            //float ratio = std::clamp(remain / total, 0.0f, 1.0f);
 
             Vector3 targetPos = playerBasePos;
             targetPos.x += playerSide * playerMoveRange;
@@ -1500,9 +1636,28 @@ void Game::Render()
             XMStoreFloat3(&screenPos, screenVec);
             if (screenPos.z >= 1.0f) continue;
 
-            ImU32 col = IM_COL32((int)(255 * (1.0f - ratio)), (int)(255 * ratio), 60, 220);
+            //float remain = beam.lockTime - musicTime;
+            float total = beam.lockTime - beam.chargeTime;
+            if (total < 0.01f) total = 0.01f;
+            float t = std::clamp((musicTime - beam.chargeTime) / total, 0.0f, 1.0f);
+
+            // 発光の脈動(sin波で明滅)、tが進むほど強くなる
+            float pulse = 0.6f + 0.4f * sinf(musicTime * 12.0f);
+            float radius = 6.0f + t * 14.0f;
+            int alpha = (int)(180 + t * 75);
+
+            ImGui::GetForegroundDrawList()->AddCircleFilled(
+                ImVec2(screenPos.x, screenPos.y), radius* pulse,
+                IM_COL32(255, 220, 150, alpha)
+            );
             ImGui::GetForegroundDrawList()->AddCircle(
-                ImVec2(screenPos.x, screenPos.y), 25.0f * ratio + 8.0f, col, 32, 3.0f);
+                ImVec2(screenPos.x, screenPos.y), radius* pulse * 1.6f,
+                IM_COL32(255, 160, 60, alpha / 2), 24, 2.0f
+            );
+
+            //ImU32 col = IM_COL32((int)(255 * (1.0f - ratio)), (int)(255 * ratio), 60, 220);
+            //ImGui::GetForegroundDrawList()->AddCircle(
+            //    ImVec2(screenPos.x, screenPos.y), 25.0f * ratio + 8.0f, col, 32, 3.0f);
         }
 
         for (int i = 0; i < 6; i++)
@@ -1617,7 +1772,7 @@ void Game::Render()
     if (m_playerModel)
     {
         Vector3 pos = playerBasePos;
-        pos.x += playerSide * playerMoveRange;
+        pos.x += playerVisualX;
 
         Matrix world = Matrix::CreateScale(0.06f) * Matrix::CreateRotationX(1.5f) * Matrix::CreateTranslation(pos);
         m_playerModel->Draw(context, *m_states, world, m_view, m_proj);
@@ -2219,7 +2374,12 @@ void Game::JudgeLongNoteL() {}
 
 void Game::JudggeLane(char key, int laneIndex)
 {
-    if (!(GetAsyncKeyState(key) & 0x0001)) return;  //押した瞬間
+    //if (!(GetAsyncKeyState(key) & 0x0001)) return;  //押した瞬間
+    bool isDown = (GetAsyncKeyState(key) & 0x8000) != 0;    // 押しっぱなし状態(held)を見る
+    bool pressedThisFrame = isDown && !m_prevLaneKeyDown[laneIndex]; // 前フレームは離れていて、今フレームは押されている=押した瞬間
+    m_prevLaneKeyDown[laneIndex] = isDown; // 次フレーム用に記録
+
+    if (!pressedThisFrame) return; // 押した瞬間でなければ何もしない
     int targetLane = laneIndex;
     int bestIndex = -1;
     float bestDiff = 9999.9f;   //大きい数字を一回代入
@@ -2417,6 +2577,25 @@ void Game::UpdateCamera()
     }
 }
 
+// InitBeamScatter : ビームの「収束前バラけ位置」をランダムに決める
+// プレイヤーの周囲、上下左右にランダムなオフセットを複数用意する
+void Game::InitBeamScatter(HomingBeam& beam)
+{
+    for (int i = 0; i < HomingBeam::kScatterCount; i++)
+    {
+        float angle = ((float)rand() / RAND_MAX) * XM_2PI;
+        float radius = 150.0f + ((float)rand() / RAND_MAX) * 250.0f;    //150~400の範囲でばらける
+        float heightOffset = ((float)rand() / RAND_MAX - 0.5f) * 200.0f;    //高さ
+
+        beam.scatterOffsets[i] = Vector3(
+            cosf(angle) * radius,
+            heightOffset,
+            sinf(angle) * radius
+        );
+    }
+    beam.scatterInitialized = true;
+}
+
 // ─────────────────────────────────────────────
 // NoteExit : 指定レーン・時刻にノーツが存在するか確認
 //   lane : 対象レーン
@@ -2453,30 +2632,66 @@ void Game::GetDefaultSize(int& width, int& height) const noexcept
 
 // DrawThickBeam : from→to を結ぶ、太さ指定可能なビームをクワッドで描画
 // カメラ方向を基準に垂直な面を作ることで、常にカメラ側を向く
-void Game::DrawThickBeam(const DirectX::SimpleMath::Vector3& from, const DirectX::SimpleMath::Vector3& to, float thickness, DirectX::XMVECTORF32 color)
+//void Game::DrawThickBeam(const DirectX::SimpleMath::Vector3& from, const DirectX::SimpleMath::Vector3& to, float thickness, DirectX::XMVECTORF32 color)
+//{
+//	Vector3 dir = to - from;
+//    float len = dir.Length();
+//	if (len < 0.01f) return; // 長さがほぼゼロなら描画しない
+//	dir.Normalize();
+//
+//	Vector3 toCam = m_camPos - from;
+//	Vector3 side = dir.Cross(toCam);    // ビーム方向とカメラ方向の外積で垂直ベクトルを求める
+//	if (side.LengthSquared() < 0.0001f) side = Vector3::Up; // 外積がほぼゼロなら上方向を代用
+//	side.Normalize();
+//	side *= thickness * 0.5f;   // ビームの半分の厚さ
+//
+//	Vector3 v0 = from - side; // クワッドの4頂点
+//	Vector3 v1 = from + side;
+//	Vector3 v2 = to + side;
+//	Vector3 v3 = to - side;
+//
+//	m_primitiveBatch->DrawQuad( // 4頂点のクワッドを描画
+//        VertexPositionColor(v0, color),
+//        VertexPositionColor(v1, color),
+//        VertexPositionColor(v2, color),
+//        VertexPositionColor(v3, color)
+//	);
+//}
+
+void Game::DrawThickBeam(const DirectX::SimpleMath::Vector3& from, const DirectX::SimpleMath::Vector3& to, float thicknessFrom, float thicknessTo, DirectX::XMVECTORF32 coreColor, DirectX::XMVECTORF32 glowColor)
 {
 	Vector3 dir = to - from;
     float len = dir.Length();
 	if (len < 0.01f) return; // 長さがほぼゼロなら描画しない
-	dir.Normalize();
+    dir.Normalize();
 
 	Vector3 toCam = m_camPos - from;
 	Vector3 side = dir.Cross(toCam);    // ビーム方向とカメラ方向の外積で垂直ベクトルを求める
 	if (side.LengthSquared() < 0.0001f) side = Vector3::Up; // 外積がほぼゼロなら上方向を代用
 	side.Normalize();
-	side *= thickness * 0.5f;   // ビームの半分の厚さ
 
-	Vector3 v0 = from - side; // クワッドの4頂点
-	Vector3 v1 = from + side;
-	Vector3 v2 = to + side;
-	Vector3 v3 = to - side;
-
-	m_primitiveBatch->DrawQuad( // 4頂点のクワッドを描画
-        VertexPositionColor(v0, color),
-        VertexPositionColor(v1, color),
-        VertexPositionColor(v2, color),
-        VertexPositionColor(v3, color)
-	);
+	//外側のグロー部分
+    {
+        Vector3 sideFrom = side * (thicknessFrom * 1.8f * 0.5f);
+        Vector3 sideTo = side * (thicknessTo * 1.8f * 0.5f);
+        m_primitiveBatch->DrawQuad(
+            VertexPositionColor(from - sideFrom, glowColor),
+            VertexPositionColor(from + sideFrom, glowColor),
+            VertexPositionColor(to + sideTo, glowColor),
+            VertexPositionColor(to - sideTo, glowColor)
+        );
+    }
+    //  芯(コア)層(細め・明るい白寄り)
+    {
+        Vector3 sideFrom = side * (thicknessFrom * 0.5f);
+        Vector3 sideTo = side * (thicknessTo * 0.5f);
+        m_primitiveBatch->DrawQuad(
+            VertexPositionColor(from - sideFrom, coreColor),
+            VertexPositionColor(from + sideFrom, coreColor),
+            VertexPositionColor(to + sideTo, coreColor),
+            VertexPositionColor(to - sideTo, coreColor)
+        );
+    }
 }
 
 #pragma region Direct3D Resources

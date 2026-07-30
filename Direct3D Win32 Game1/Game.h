@@ -55,18 +55,48 @@ struct Beams {
     }
 };
 
-struct HomingBeam {
-    //jsonに保存するデータ群
-    float chargeTime = 0.0f;    //警告開始
-	float lockTime = 0.0f;      //差表確定・発射
-	float hitTime = 0.0f;       //着弾判定
+//struct HomingBeam {
+//    //jsonに保存するデータ群
+//    float chargeTime = 0.0f;    //警告開始
+//	float lockTime = 0.0f;      //差表確定・発射
+//	float hitTime = 0.0f;       //着弾判定
+//
+//    //実行時に計算する値
+//	int lockedSide = 0;        //ロックした側のレーン（-1=左,　0=中央, 1=右）
+//    DirectX::SimpleMath::Vector3 lockedPos;
+//	BeamState state = BeamState::Homing;
+//	bool chargeSoundPlayerd = false;
+//	bool fireSoundPlayed = false;
+//    bool lockSoundPlayed = false;
+//
+//    bool judgmentLocked = false;    //早期ロックの判定
+//
+//    //収束演出用の散らばり候補点
+//    static constexpr float kEarlyLockRatio = 0.8f;  // chargeTime~lockTimeのうちこの関数の進んだ時点で実判定を締め切る
+//    static constexpr int kScatterCount = 10; //線の数
+//    DirectX::SimpleMath::Vector3 scatterOffsets[kScatterCount];
+//    bool scatterInitialized = false;
+//};
 
-    //実行時に計算する値
-	int lockedSide = 0;        //ロックした側のレーン（-1=左,　0=中央, 1=右）
+struct HomingBeam {
+    float chargeTime = 0.0f;
+    float lockTime = 0.0f;
+    float hitTime = 0.0f;
+
+    int lockedSide = 0;
     DirectX::SimpleMath::Vector3 lockedPos;
-	BeamState state = BeamState::Homing;
-	bool chargeSoundPlayerd = false;
-	bool fireSoundPlayed = false;
+    BeamState state = BeamState::Homing;
+
+    int searchBeatsPlayed = 0;
+    bool lockSoundPlayed = false;
+    bool fireSoundPlayed = false;
+
+    bool judgmentLocked = false;
+
+    static constexpr int kScatterCount = 15;
+    static constexpr int kSearchBeatCount = 3;  //何回サーチ音を鳴らすかついでにkSearchBeatCountの最後の音はロック音にかぶる
+    DirectX::SimpleMath::Vector3 scatterOffsets[kScatterCount];
+    bool scatterInitialized = false;
 };
 
 struct JudggeCircleframe {
@@ -167,6 +197,8 @@ public:
 
     void UpdateCamera();
 
+    void InitBeamScatter(HomingBeam& beam);
+
     bool NoteExit(int lane, float time);
 
     int GetMirrorLane(int lane);
@@ -238,6 +270,11 @@ private:
         const DirectX::SimpleMath::Vector3& to,
         float thickness, DirectX::XMVECTORF32 color);
 
+    void DrawThickBeam(const DirectX::SimpleMath::Vector3& from,
+        const DirectX::SimpleMath::Vector3& to,
+        float thicknessFrom, float thicknessTo,
+		DirectX::XMVECTORF32 coreColor,DirectX::XMVECTORF32 glowColor);
+
     DirectX::SimpleMath::Vector3 cameraPos = { 0.0f, -800.0f, -200.0f };
     // レーン中心(X=0)、判定ラインZ=-210〜出現Z=1000あたりの中間くらいの高さで側面から
     DirectX::XMFLOAT3 m_camSidePos = { 0.0f, 0.0f, 800.0f };  // 400 → 800くらいに
@@ -278,6 +315,7 @@ private:
     bool KeySpacePrev = false;
     bool LongStartPlaced = false;
     bool isOutRange = false;
+    bool m_prevLaneKeyDown[6] = { false, false, false, false, false, false };
 
     BGMstate bgmstate = BGMstate::stop;
 
@@ -321,6 +359,8 @@ private:
     float playerSideBlend = 1.0f; // 見た目補間用（-1.0〜+1.0）
     DirectX::SimpleMath::Vector3 playerBasePos = { 0.0f, -100.0f, -400.0f }; // 基準位置
     float playerMoveRange = 70.0f; // 左右移動の振れ幅
+    float playerVisualX = 0.0f; //見た目用の現在のX座標（補間）
+    float playerMoveSpeed = 800.0f; //1秒あたりにどれぐらい動けるか
 
     void Update(DX::StepTimer const& timer);
     void Render();

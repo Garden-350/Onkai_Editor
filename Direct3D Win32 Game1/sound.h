@@ -7,6 +7,9 @@ typedef enum
 {
 	SOUND_LABEL_SE001,
 	SOUND_LABEL_SE002,
+	SOUND_BEAM_SARCH,
+	SOUND_BEAM_DECITION,
+	SOUND_BEAM_FIRING,
 
 	SOUND_LABEL_BGM001,
 	SOUND_LABEL_BGM002,
@@ -31,6 +34,9 @@ private:
 
 		{"asset/se/メトロノームのカチッ.wav",false},
 		{"asset/se/メトロノームのチーン.wav", false},
+		{"asset/se/beam_sarch.mp3",false},
+		{"asset/se/beam_kakutei.mp3",false},
+		{"asset/se/beam_Go.wav",false},
 
 		{"asset/bgm/mirror.wav", true},
 		{"asset/bgm/maou_bgm_piano39.wav", true},
@@ -47,6 +53,7 @@ private:
 
 	HRESULT FindChunk(HANDLE, DWORD, DWORD&, DWORD&);
 	HRESULT ReadChunkData(HANDLE, void*, DWORD, DWORD);
+	HRESULT LoadMp3AsPCM(LPCSTR filename, WAVEFORMATEXTENSIBLE& outWfx, BYTE*& outData, DWORD& outSize);
 
 public:
 	// ゲームループ開始前に呼び出すサウンドの初期化処理
