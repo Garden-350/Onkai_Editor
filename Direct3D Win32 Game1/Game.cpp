@@ -689,7 +689,7 @@ void Game::Update(DX::StepTimer const& timer)
 
             if (beam.state == BeamState::Homing)
             {
-                // ── カン：タンを3回鳴らし終えた瞬間に即ロック確定 ──
+                // カン：タンを3回鳴らし終えた瞬間に即ロック確定
                 if (!beam.judgmentLocked && beam.searchBeatsPlayed >= HomingBeam::kSearchBeatCount)
                 {
                     beam.judgmentLocked = true;
@@ -714,18 +714,33 @@ void Game::Update(DX::StepTimer const& timer)
                     {
                         sound.Play(SOUND_BEAM_FIRING);
                         beam.fireSoundPlayed = true;
+                        beam.fireBeam = true;
                     }
+                    
                     beam.state = BeamState::Fired;
+                    //0.5sごとに判定を行うための時間セット
+                    beam.nextCountTime = musicTime + HomingBeam::kCountInterval;
                 }
             }
             else if (beam.state == BeamState::Fired)
             {
+                if (beam.fireBeam)
+                {
+
+                }
                 if (musicTime >= beam.hitTime)
                 {
-                    bool dodged = (playerSide != beam.lockedSide);
-                    if (dodged) success++;
-                    else miss++;
                     beam.state = BeamState::Resolved;
+                }
+                else
+                {
+                    if (musicTime >= beam.nextCountTime && beam.nextCountTime < beam.hitTime)
+                    {
+                        bool dodged = (playerSide != beam.lockedSide);
+                        if (dodged) perfect++;
+                        else miss++;
+                        beam.nextCountTime += HomingBeam::kCountInterval;
+                    }
                 }
             }
         }

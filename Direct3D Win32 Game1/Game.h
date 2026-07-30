@@ -82,6 +82,7 @@ struct HomingBeam {
     float chargeTime = 0.0f;
     float lockTime = 0.0f;
     float hitTime = 0.0f;
+    float reloadHit = 0.0f;
 
     int lockedSide = 0;
     DirectX::SimpleMath::Vector3 lockedPos;
@@ -92,9 +93,13 @@ struct HomingBeam {
     bool fireSoundPlayed = false;
 
     bool judgmentLocked = false;
+    bool fireBeam = false;
 
     static constexpr int kScatterCount = 15;
     static constexpr int kSearchBeatCount = 3;  //何回サーチ音を鳴らすかついでにkSearchBeatCountの最後の音はロック音にかぶる
+    static constexpr float kCountInterval = 0.05f;   //判定を行う間隔
+    float nextCountTime = 0.0f; //次に判定を行うまでの時間(.cppで増やす方)
+    
     DirectX::SimpleMath::Vector3 scatterOffsets[kScatterCount];
     bool scatterInitialized = false;
 };
