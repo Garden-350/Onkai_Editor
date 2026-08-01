@@ -331,6 +331,14 @@ void Game::Initialize(HWND window, int width, int height)
         m_noteModel.reset();    //失敗時はnullptrに戻す
     }
 
+	m_flickModel = std::make_unique<FbxModel>();
+    //横フリックのモデルに差し替えてね
+    if(!m_flickModel->Load(dev, L"asset/Model/Flick/allow.fbx", L"asset/Model/Flick"))
+    {
+        OutputDebugStringW(L"[Game] FlickModel load failed\n");
+        m_flickModel.reset();
+	}
+
 	m_playerModel = std::make_unique<FbxModel>();
     if(!m_playerModel->Load(dev,L"asset/Model/Player/player.fbx", L"asset/Model/Player"))
     {
@@ -424,6 +432,7 @@ void Game::Update(DX::StepTimer const& timer)
 
         for (auto& note : notes)
         {
+			if (note.note == FLICK_RIGHT || note.note == FLICK_LEFT) continue; //フリックは判定円にホーミングしない
             if (note.lane < 0 || note.lane >= (int)judggeCircles.size()) continue;
             const auto& circle = judggeCircles[note.lane];
             auto circlePos = circle.GetPosition(now);
@@ -563,12 +572,18 @@ void Game::Update(DX::StepTimer const& timer)
             case EditorState::PLACING_SPAWN:
                 // ノーツ配置ステップ1：出現位置(spawnPos)を決定
                 m_TempNote.spawnPos = { worldX, worldPos.y, worldZ };
+                if (m_TempNote.note == FLICK_RIGHT || m_TempNote.note == FLICK_LEFT)
+                {
+                    m_TempNote.spawnPos = { enemyPos.x, enemyPos.y, enemyPos.z }; // ← 敵の位置に固定
+                }
                 m_EditorState = EditorState::PLACING_JUDGE; // 次は判定位置
                 break;
 
             case EditorState::PLACING_JUDGE:
                 // ノーツ配置ステップ2：判定位置(judgePos)を決定 → ノーツをリストへ追加
                 m_TempNote.judgePos = { worldX, worldPos.y, worldZ };
+                if (m_TempNote.note == FLICK_RIGHT || m_TempNote.note == FLICK_LEFT)
+                    m_TempNote.judgePos = { 0.0f, m_TempNote.judgePos.y, -210.0f }; // ← 到達位置はX=0, Z=-210固定
                 if (m_TempNote.time <= m_TempNote.spawnTime)
                     m_TempNote.time = m_TempNote.spawnTime + 0.1f; // 時刻の整合性チェック
                 notes.push_back(m_TempNote);
@@ -805,7 +820,7 @@ void Game::Update(DX::StepTimer const& timer)
     //ミス判定
     for (int i = (int)notes.size() - 1; i >= 0; i--)
     {
-        if (notes[i].note == LONG_START || notes[i].note == LONG_CENTER) continue;
+        if (notes[i].note == FLICK_RIGHT || notes[i].note == FLICK_LEFT) continue;
         if (musicTime - notes[i].time > kGud)
         {
             notes.erase(notes.begin() + i);
@@ -829,6 +844,8 @@ void Game::Update(DX::StepTimer const& timer)
 
         for (const auto& Ik : kLaneKeys)
             JudggeLane(Ik.key, Ik.laneIndex);
+
+        JudggeFlickNotes();
     }
     //else
     //{
@@ -973,10 +990,8 @@ void Game::Render()
         }
 
         // ── ノーツ種別選択ボタン ─────────────────
-        const char* noteNames[] = { "TAP","LONG","antiMirror","MirrorNote",
-                                     "SlideR","SlideL","SlideU","SlideD" };
-        NoteType noteTypes[] = { TAP, LONG_START, UNTIMIRROR, MIRRORNOTE,
-                                    SLIDE_RIGHT, SLIDE_LEFT, SLIDE_UP, SLIDE_DOWN };
+        const char* noteNames[] = { "TAP", "FLICK_RIGHT", "FLICK_LEFT" };
+        NoteType noteTypes[] = { TAP, FLICK_RIGHT, FLICK_LEFT };
 
         // カメラビュー切替ボタン
         if (ImGui::Button("Play View", ImVec2(-1, 0))) {
@@ -988,7 +1003,7 @@ void Game::Render()
         }
 
         // 各ノーツ種別ボタン（選択中は青くハイライト）
-        for (int i = 0; i < 8; i++)
+        for (int i = 0; i < (int)std::size(noteTypes); i++)
         {
             bool selected = (currentNoteType == noteTypes[i]);
             if (selected)
@@ -1013,6 +1028,24 @@ void Game::Render()
             if (sel) ImGui::PopStyleColor();
         }
 
+		//フリック専用：終点レーン選択------------------------
+        if(currentNoteType == FLICK_RIGHT || currentNoteType == FLICK_LEFT)
+        {
+            ImGui::SeparatorText("To (Flick End Lane)");
+            for (int i = 0; i < 6; i++)
+            {
+				if (i > 0) ImGui::SameLine();   // 横並び
+                bool sel = (m_TempNote.flickLaneTo == i);
+                if (sel) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.8f, 0.6f, 1.0f));
+                char label[16];
+                sprintf_s(label, "%s##to%d", keyNames[i], i);
+                if (ImGui::Button(label, ImVec2(28, 0))) m_TempNote.flickLaneTo = i;
+                if (sel) ImGui::PopStyleColor();
+            }
+            if(m_TempNote.flickLaneTo < 0)
+				ImGui::TextDisabled("未設定 = Fromと同じ扱い");
+		}
+
         // ── ノーツ配置ボタン ─────────────────────
         ImGui::Spacing();
         ImGui::SeparatorText("Place");
@@ -1031,9 +1064,14 @@ void Game::Render()
         {
             if (!isPlacing)
             {
+				int savedLane = m_TempNote.lane; // 現在のレーンを保存
+				int savedFlickLaneTo = m_TempNote.flickLaneTo; // 現在のフリック終点レーンを保存
                 // 配置開始：テンプレートノーツを初期化
                 m_TempNote = Note();
                 m_TempNote.note = currentNoteType;
+				m_TempNote.lane = savedLane; // 保存したレーンを復元
+				m_TempNote.flickLaneTo = savedFlickLaneTo; // 保存したフリック終点レーンを復元
+
                 m_EditorState = EditorState::PLACING_SPAWN;
             }
             else
@@ -1224,6 +1262,22 @@ void Game::Render()
                 mid.y = (n.spawnPos.y + n.judgePos.y) * 0.5f;
                 mid.z = (n.spawnPos.z + n.judgePos.z) * 0.5f;
                 n.controlPoints.push_back(mid);
+            }
+
+            if (n.note == FLICK_RIGHT || n.note == FLICK_LEFT)
+            {
+                ImGui::Text("To:");
+                ImGui::SameLine();
+                for (int i = 0; i < 6; i++)
+                {
+                    if (i > 0) ImGui::SameLine();
+                    bool sel = (n.flickLaneTo == i);
+					if (sel) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.8f, 0.6f, 1.0f));    // 緑色
+                    char label[8];
+                    sprintf_s(label, "%s##nto%d", keyNames[i], i);
+                    if (ImGui::Button(label, ImVec2(24, 0))) n.flickLaneTo = i;
+                    if (sel) ImGui::PopStyleColor();
+                }
             }
 
             ImGui::Spacing();
@@ -1742,6 +1796,7 @@ void Game::Render()
         for (int i = 0; i < (int)notes.size(); i++)
         {
             const auto& note = notes[i];
+            if (note.note == FLICK_RIGHT || note.note == FLICK_LEFT) continue;
             float et = note.time;
             float st = note.GetSpawnTime();
 
@@ -1780,6 +1835,47 @@ void Game::Render()
 
             // デバッグ用テキスト（毎フレームノーツ数分表示されるので重い。本番では削除推奨）
             //ImGui::Text("now: %.2f  displayStart: %.2f  et: %.2f", now, st, et);
+        }
+    }
+
+    //横フリック描画
+    if (m_flickModel)
+    {
+        for (int i = 0; i < (int)notes.size(); i++)
+        {
+            const auto& note = notes[i];
+            if (note.note != FLICK_RIGHT && note.note != FLICK_LEFT) continue;
+            float et = note.time;
+            float st = note.GetSpawnTime();
+            DirectX::SimpleMath::Vector3 pos;
+            if (bgmstate != BGMstate::play)
+            {
+                pos = note.spawnPos;
+            }
+            else
+            {
+                if (now < st || now > et) continue; // 表示範囲外はスキップ
+                pos = EvaluateNotePosition(note, now);
+            }
+			float dirScaleX = (note.note == FLICK_RIGHT) ? 1.0f : -1.0f;    //反転するか否か
+
+            // スケールは常に正の値（反転は使わない）
+            DirectX::SimpleMath::Vector3 tint =
+                (note.note == FLICK_RIGHT)
+                ? DirectX::SimpleMath::Vector3(1.0f, 0.4f, 0.4f)
+                : DirectX::SimpleMath::Vector3(0.4f, 0.6f, 1.0f);
+
+            // まずは0度・180度で試すのが一番安全（±90度は前後軸の取り方次第で対称に見えることがある）
+            float RotationY = (note.note == FLICK_RIGHT) ? -1.57f : 1.57f;
+
+            float scale = 100.0f;
+            DirectX::SimpleMath::Matrix world =
+                DirectX::SimpleMath::Matrix::CreateScale(scale) *
+                DirectX::SimpleMath::Matrix::CreateRotationY(RotationY) *
+                DirectX::SimpleMath::Matrix::CreateTranslation(pos);
+
+            m_flickModel->SetTintColor(tint);
+            m_flickModel->Draw(context, *m_states, world, m_view, m_proj);
         }
     }
 
@@ -2241,151 +2337,6 @@ void Game::LoadChart(std::string name)
     OutputDebugStringA(("[LoadChart]" + g_chartStatusMessage + "\n").c_str());
 }
 
-// ─────────────────────────────────────────────
-// JudgeNote 系（S/D/F/J/K/L）
-//
-//   共通処理フロー:
-//     1. 対応キーが押された瞬間かチェック（0x0001 エッジ検出）
-//     2. mirrorMode の場合レーン番号を左右反転
-//     3. 対象レーンかつ TAP/SLIDE 系のノーツの中から
-//        判定ラインに最も近いノーツを線形探索
-//     4. 距離に応じてランク判定（PERFECT / GREAT / GUD）
-//     5. 判定済みノーツを配列から削除、スコアカウントを増加
-//
-//   ※ 現在はコメントアウトされており実際には呼ばれていない。
-//      ゲームモード実装時に有効化する。
-// ─────────────────────────────────────────────
-void Game::JudgeNoteS()
-{
-    if (GetAsyncKeyState('S') & 0x0001)
-    {
-        // S キー → レーン0（mirrorMode 時はレーン5）
-        int targetLane = mirrorMode ? 5 : 0;
-
-        float closeNote = 9999.0f;
-        int   NoteKind = -1;
-
-        for (int i = 0; i < (int)notes.size(); i++)
-        {
-            if (notes[i].lane != targetLane)               continue; // 対象レーン以外スキップ
-            if (notes[i].note == LONG_START ||
-                notes[i].note == LONG_CENTER)              continue; // ロングノーツは別関数で処理
-
-            // 判定ラインからの距離（pixel 換算）
-            float note = judgeLine - (notes[i].time - musicTime) * playSpeed;
-            float diff = fabs(note - judgeLine);
-
-            if (diff < closeNote) { closeNote = diff; NoteKind = i; }
-
-            if (NoteKind != -1)
-            {
-                if (closeNote < 20) { printf("PERFECT"); }
-                else if (closeNote < 40) { printf("GREAT"); }
-                else if (closeNote < 80) { printf("GUD"); }
-                else continue;
-
-                // MirrorNote なら判定時にミラーモードをトグル
-                if (notes[i].note == MIRRORNOTE) mirrorMode = !mirrorMode;
-                notes.erase(notes.begin() + i);
-                success++;
-                break;
-            }
-        }
-    }
-}
-
-// D/F/J/K/L の JudgeNote 関数も同じ構造のため、詳細コメントは JudgeNoteS を参照。
-// 違いはターゲットレーン番号のみ。
-void Game::JudgeNoteD() { /* 同上（レーン1、mirrorMode時:4）*/ }
-void Game::JudgeNoteF() { /* 同上（レーン2、mirrorMode時:3）*/ }
-void Game::JudgeNoteJ() { /* 同上（レーン3、mirrorMode時:2）*/ }
-void Game::JudgeNoteK() { /* 同上（レーン4、mirrorMode時:1）*/ }
-void Game::JudgeNoteL() { /* 同上（レーン5、mirrorMode時:0）*/ }
-
-// ─────────────────────────────────────────────
-// JudgeLongNote 系（S/D/F/J/K/L）
-//
-//   ロングノーツの判定：
-//     ・LONG_START がレンジ内に来たらキーを押して開始 (isHold = true)
-//     ・押し続けている間、判定ラインを通過した LONG_CENTER を自動消去
-//     ・キーを離したら isHold = false
-//
-//   ※ static 変数で「前フレームのキー状態」と「ホールド状態」を保持している。
-//      ただし static 変数は関数ごとに独立しているため、
-//      複数レーン同時ホールドには対応できる（レーンごとに別変数）。
-// ─────────────────────────────────────────────
-void Game::JudgeLongNoteS()
-{
-    int targetLane = mirrorMode ? 5 : 0;
-
-    bool keyPress = (GetAsyncKeyState('S') & 0x8000); // キーを押し続けている
-    bool keyPush = (GetAsyncKeyState('S') & 0x0001); // 押した瞬間
-    static bool prevKeyDown = false;
-    static bool isHold = false; // ロングノーツを保持中か
-    static bool isHoldCenter = false; // （未使用）
-
-    if (bgmstate != BGMstate::play) return;
-
-    if (keyPress)
-    {
-        // LONG_START を最も近いところから探す
-        float closestDiff = 9999.0f;
-        int   closestIndex = -1;
-
-        for (int i = 0; i < (int)notes.size(); i++)
-        {
-            if (notes[i].lane != targetLane) continue;
-            if (notes[i].note != LONG_START) continue;
-
-            float y = judgeLine - (notes[i].time - musicTime) * playSpeed;
-            float diff = fabs(y - judgeLine);
-            if (diff < closestDiff) { closestDiff = diff; closestIndex = i; }
-        }
-
-        if (closestIndex != -1 && closestDiff < 40)
-        {
-            printf("LONG START\n");
-            isHold = true;
-            fastLong = true;
-            notes.erase(notes.begin() + closestIndex);
-            success++;
-        }
-    }
-
-    if (isHold)
-    {
-        // 判定ラインを通過した LONG_CENTER を自動消去（連続成功扱い）
-        for (int i = 0; i < (int)notes.size(); i++)
-        {
-            if (notes[i].lane != targetLane) continue;
-            if (notes[i].note != LONG_CENTER) continue;
-
-            float y = judgeLine - (notes[i].time - musicTime) * playSpeed;
-            if (y > judgeLine) // 判定ラインより手前（画面下側）に来たら
-            {
-                notes.erase(notes.begin() + i);
-                i--;
-                success++;
-            }
-        }
-    }
-
-    if (!keyPress) // キーを離したらホールド終了
-    {
-        isHold = false;
-        isHoldCenter = false;
-        fastLong = false;
-    }
-
-    prevKeyDown = keyPush;
-}
-
-// JudgeLongNoteD〜L も同構造のため省略（ターゲットレーンが異なるのみ）
-void Game::JudgeLongNoteD() {}
-void Game::JudgeLongNoteF() {}
-void Game::JudgeLongNoteJ() {}
-void Game::JudgeLongNoteK() {}
-void Game::JudgeLongNoteL() {}
 
 void Game::JudggeLane(char key, int laneIndex)
 {
@@ -2403,7 +2354,7 @@ void Game::JudggeLane(char key, int laneIndex)
     for (int i = 0; i < (int)notes.size(); i++)
     {
         if(notes[i].lane != targetLane) continue;
-        if (notes[i].note == LONG_START || notes[i].note == LONG_CENTER) continue;
+        if(notes[i].note == FLICK_RIGHT || notes[i].note == FLICK_LEFT) continue;
 
         float diff = fabsf(notes[i].time - musicTime);  //時間差で判定
         if (diff < bestDiff)
@@ -2438,6 +2389,76 @@ void Game::JudggeLane(char key, int laneIndex)
     success++;
 
 
+}
+
+// JudgeFlickNotes : 横フリック判定（時間ベース）
+//
+//   毎フレーム呼び出し、判定ウィンドウ(±kGud)に入っている間、
+//   プレイヤーが要求サイドにいれば時間差でランク判定して成立。
+//   ウィンドウを過ぎてしまったらミス。
+void Game::JudggeFlickNotes()
+{
+    for (int i = (int)notes.size() - 1; i >= 0; i--)
+    {
+        auto& n = notes[i];
+		if (n.note != NoteType::FLICK_RIGHT && n.note != NoteType::FLICK_LEFT) continue;
+
+        float diff = n.time - musicTime;    //正：来てない　負：過ぎた
+		if (diff > kGud) continue;   //判定圏外
+		int requiredSide = (n.note == NoteType::FLICK_RIGHT) ? 1 : -1;  // 右フリックなら1、左フリックなら-1
+
+        if(fabsf(diff) <= kGud && playerSide == requiredSide)
+        {
+            char dbgBuf[128];
+            sprintf_s(dbgBuf, "[FlickJudge] n.lane=%d n.flickLaneTo=%d\n", n.lane, n.flickLaneTo);
+            OutputDebugStringA(dbgBuf);
+
+			float absDiff = fabsf(diff);    //絶対値で判定
+            int rank =
+                (absDiff < kPerfect) ? 0 :
+                (absDiff < kGreat) ? 1 : 2;
+    //        if (n.lane >= 0 && n.lane < 6)
+    //        {
+				//m_judggeEffects[n.lane].rank = rank;    // 判定エフェクトのランクを設定
+				//m_judggeEffects[n.lane].timer = 0.5f;   // 判定エフェクトの表示時間をリセット
+    //        }
+
+			//レーン範囲（From~To）を求めて、その範囲内のレーンに判定エフェクトを表示する
+            int laneFrom = n.lane;
+			int laneTo = (n.flickLaneTo >= 0) ? n.flickLaneTo : n.lane; // flickLaneTo が -1 の場合は lane と同じにする
+			int lo = std::min(laneFrom, laneTo);    // レーン範囲の下限
+			int hi = std::max(laneFrom, laneTo);    // レーン範囲の上限
+            for (int L = lo; L <= hi; L++)
+            {
+				if (L < 0 || L >= 6) continue; // 範囲外のレーンはスキップ
+                m_judggeEffects[L].rank = rank;    // 判定エフェクトのランクを設定
+                m_judggeEffects[L].timer = 0.5f;   // 判定エフェクトの表示時間をリセット
+            }
+
+            if (rank == 0)
+            {
+                perfect++;
+            }
+            else if (rank == 1)
+            {
+                great++;
+            }
+            else if (rank == 2)
+            {
+                good++;
+            }
+            notes.erase(notes.begin() + i);
+            success++;
+            continue;
+        }
+
+        if(diff < -kGud)
+        {
+            //判定圏外で成立せず、過ぎてしまった場合はミス
+            notes.erase(notes.begin() + i);
+            miss++;
+		}
+    }
 }
 
 void Game::UpdateCamera()

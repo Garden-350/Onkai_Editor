@@ -5,22 +5,15 @@
 enum NoteType
 {
     TAP,
-    LONG_START,
-    LONG_CENTER,
-    LONG_END,
-    UNTIMIRROR, //ミラーの影響を受けないノーツ
-    MIRRORNOTE, //叩いたらミラーオンオフが切り替わる
-    BEAM,
-    SLIDE_RIGHT,
-    SLIDE_LEFT,
-    SLIDE_UP,
-    SLIDE_DOWN,
+    FLICK_RIGHT,
+	FLICK_LEFT,
 };
 
 struct Note
 {
 public:
     int lane = 0;   // キー対応（0=S,1=D,2=F,3=J,4=K,5=L）
+	int flickLaneTo = -1; // フリック専用：終点レーン（-1なら未設定＝laneと同じ扱い）
     float y;    // Y座標
     float time; //判定時刻
     float spawnTime = 1.0f;    //出現時刻(-1ならtime = -2.0f)

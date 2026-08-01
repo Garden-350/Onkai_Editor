@@ -184,21 +184,9 @@ public:
     void SaveChart(std::string name);
     void LoadChart(std::string name);
 
-    void NoteBorn();
-    void JudgeNoteS();
-    void JudgeNoteD();
-    void JudgeNoteF();
-    void JudgeNoteJ();
-    void JudgeNoteK();
-    void JudgeNoteL();
-    void JudgeLongNoteS();
-    void JudgeLongNoteD();
-    void JudgeLongNoteF();
-    void JudgeLongNoteJ();
-    void JudgeLongNoteK();
-    void JudgeLongNoteL();
 
     void JudggeLane(char key, int laneIndex);
+    void JudggeFlickNotes();
 
     void UpdateCamera();
 
@@ -222,6 +210,7 @@ private:
     std::unique_ptr<DirectX::BasicEffect> m_basicEffect;
     std::unique_ptr<DirectX::CommonStates> m_states;
     std::unique_ptr<NoteModel> m_noteModel;
+	std::unique_ptr<FbxModel> m_flickModel;
 	std::unique_ptr<FbxModel> m_playerModel;
 	std::unique_ptr<FbxModel> m_enemyModel;
     std::unique_ptr<DirectX::IEffectFactory> m_fxFactory;
