@@ -127,6 +127,17 @@ static DirectX::SimpleMath::Vector3 EvaluateNotePosition(
     return LerpVector3(LerpVector3(a, b, t), LerpVector3(b, c, t), t);
 }
 
+static DirectX::SimpleMath::Vector3 EvaluateLongNotePos(const Note& note, float now)
+{
+    float startTime = note.GetSpawnTime();
+    float arraiveTime = note.arrivalTime;
+	float duration = arraiveTime - startTime;
+	if (duration < 0.0001f) duration = 0.0001f; // ゼロ除算防止
+
+	float t = (now - startTime) / duration; //not クランプ
+	return LerpVector3(note.spawnPos, note.judgePos, t);
+}
+
 
 // ─────────────────────────────────────────────
 // Game コンストラクタ
@@ -279,6 +290,15 @@ static void DrawJuddgeBurst(ImDrawList* draw, ImVec2 center, float age, int rank
     //}
 }
 
+float Game::CalcFacingAngleY(const DirectX::SimpleMath::Vector3& from, const DirectX::SimpleMath::Vector3& to)
+{
+    Vector3 dir = to - from;
+    dir.y = 0.0f;
+	if (dir.LengthSquared() < 0.0001f) return 0.0f;
+	dir.Normalize();
+    return atan2f(dir.x, dir.z);
+}
+
 // ─────────────────────────────────────────────
 // Initialize : D3D11リソース初期化 & ImGui セットアップ
 //   window : ウィンドウハンドル
@@ -352,6 +372,28 @@ void Game::Initialize(HWND window, int width, int height)
         m_enemyModel.reset();
     }
 
+	m_Long_Sentan_Model = std::make_unique<FbxModel>();
+    if(!m_Long_Sentan_Model->Load(dev, L"asset/Model/kusari/kusari_sentan_2.fbx", L"asset/Model/kusari_sentan_2"))
+    {
+        OutputDebugStringW(L"[Game] Long_Sentan_Model load failed\n");
+        m_Long_Sentan_Model.reset();
+	}
+
+    m_Long_Dou_Model = std::make_unique<FbxModel>();
+    if (!m_Long_Dou_Model->Load(dev, L"asset/Model/kusari/kusari_dou.fbx", L"asset/Model/kusari_dou"))
+    {
+        OutputDebugStringW(L"[Game] Long_Dou_Model load failed\n");
+        m_Long_Dou_Model.reset();
+    }
+
+	m_Long_O_Model = std::make_unique<FbxModel>();
+    if (!m_Long_O_Model->Load(dev, L"asset/Model/kusari/kusari_o_2.fbx", L"asset/Model/kusari_o_2"))
+    {
+        OutputDebugStringW(L"[Game] Long_O_Model load failed\n");
+        m_Long_O_Model.reset();
+    }
+
+
     // ※ 3Dモデルのロード情報（現在は未使用）
     //struct Load3DInfo {
     //    std::string filename;
@@ -401,6 +443,26 @@ void Game::Tick()
         });
 
     Render();
+}
+
+DirectX::SimpleMath::Vector3 Game::EvaluteChainPartPosition(const Note& note, float now, float leadOffset)
+{
+    float virtualTime = now + leadOffset; // 先行してる分、時間を進めて評価する
+    return EvaluateLongNotePosition(note, virtualTime);
+}
+
+DirectX::SimpleMath::Vector3 Game::EvaluateLongNotePosition(const Note& note, float now)
+{
+    float startTime = note.GetSpawnTime();
+    float endTime = note.time;
+    float duration = endTime - startTime;
+    if (duration < 0.0001f) duration = 0.0001f;
+
+    float t = (now - startTime) / duration; // クランプしない
+
+    const auto& p0 = note.spawnPos;
+    const auto& p3 = note.judgePos;
+    return LerpVector3(p0, p3, t);
 }
 
 // ─────────────────────────────────────────────
@@ -990,8 +1052,8 @@ void Game::Render()
         }
 
         // ── ノーツ種別選択ボタン ─────────────────
-        const char* noteNames[] = { "TAP", "FLICK_RIGHT", "FLICK_LEFT" };
-        NoteType noteTypes[] = { TAP, FLICK_RIGHT, FLICK_LEFT };
+        const char* noteNames[] = { "TAP", "LONG","FLICK_RIGHT", "FLICK_LEFT" };
+        NoteType noteTypes[] = { TAP, LONGNOTE, FLICK_RIGHT, FLICK_LEFT };
 
         // カメラビュー切替ボタン
         if (ImGui::Button("Play View", ImVec2(-1, 0))) {
@@ -1046,6 +1108,16 @@ void Game::Render()
 				ImGui::TextDisabled("未設定 = Fromと同じ扱い");
 		}
 
+        //ロング
+        if(currentNoteType == LONGNOTE)
+        {
+            ImGui::SeparatorText("Hold Duration");
+            static float longDurationInput = 1.0f;
+            ImGui::InputFloat("Duration (sec)##long", &longDurationInput, 0.1f);
+            if (longDurationInput < 0.05f) longDurationInput = 0.05f;
+            m_TempNote.holdDuration = longDurationInput;
+		}
+
         // ── ノーツ配置ボタン ─────────────────────
         ImGui::Spacing();
         ImGui::SeparatorText("Place");
@@ -1066,11 +1138,13 @@ void Game::Render()
             {
 				int savedLane = m_TempNote.lane; // 現在のレーンを保存
 				int savedFlickLaneTo = m_TempNote.flickLaneTo; // 現在のフリック終点レーンを保存
+				float savedHoldDuration = m_TempNote.holdDuration; // 現在のロングノーツの保持時間を保存
                 // 配置開始：テンプレートノーツを初期化
                 m_TempNote = Note();
                 m_TempNote.note = currentNoteType;
 				m_TempNote.lane = savedLane; // 保存したレーンを復元
 				m_TempNote.flickLaneTo = savedFlickLaneTo; // 保存したフリック終点レーンを復元
+				m_TempNote.holdDuration = savedHoldDuration; // 保存したロングノーツの保持時間を復元
 
                 m_EditorState = EditorState::PLACING_SPAWN;
             }
@@ -1158,6 +1232,7 @@ void Game::Render()
             }
         }
 
+
         //ビーム描画
 		ImGui::SeparatorText("Homing Beams");
         for(int i = 0; i <(int)homingBeams.size(); i++)
@@ -1218,11 +1293,42 @@ void Game::Render()
             }
 
             // 時刻編集（SpawnTime = 出現時刻、ArriveTime = 判定時刻）
-            ImGui::InputFloat("StartTime", &n.spawnTime, 0.01f);
-            ImGui::InputFloat("ArriveTime", &n.time, 0.01f);
-            if (n.time <= n.GetSpawnTime())
-                n.time = n.GetSpawnTime() + 0.01f; // 整合性チェック
-            ImGui::Text("TravelTime: %.2f sec", n.time - n.GetSpawnTime());
+   //         ImGui::InputFloat("StartTime", &n.spawnTime, 0.01f);
+   //         ImGui::InputFloat("ArriveTime", &n.time, 0.01f);
+   //         if (n.time <= n.GetSpawnTime())
+   //             n.time = n.GetSpawnTime() + 0.01f; // 整合性チェック
+   //         ImGui::Text("TravelTime: %.2f sec", n.time - n.GetSpawnTime());
+			//ImGui::Text("From %.2f to %.2f sec", n.GetSpawnTime(), n.time);
+
+            //時刻編集（3段階）
+            //1.表示開始時刻 = SpawnTime(クリック位置から表示開始時間)
+            //2.到達時刻 = arrivalTime(判定ラインに到達する時刻)
+            //3.終了時刻 = time(通り過ぎて消える)
+            ImGui::SeparatorText("Timeline Settings");
+			ImGui::InputFloat("Display Start Time (sec)", &n.spawnTime, 0.01f);
+			ImGui::InputFloat("Arrival Time (sec)", &n.arrivalTime, 0.01f);
+			ImGui::InputFloat("End Time (sec)", &n.time, 0.01f);
+
+            //整合性チェック
+            if(n.arrivalTime <= n.GetSpawnTime())
+				n.arrivalTime = n.GetSpawnTime() + 0.01f;
+            if(n.time <= n.arrivalTime)
+				n.time = n.arrivalTime + 0.01f;
+
+			ImGui::Text("Display: %.2f sec, Arrival: %.2f sec, End: %.2f sec", n.arrivalTime - n.GetSpawnTime());
+			ImGui::Text("Pass through: %.2f sec", n.time - n.arrivalTime);
+
+            ImGui::SeparatorText("Edit Timeline");
+			float fromTime = n.GetSpawnTime();
+			float toTime = n.time;
+            if(ImGui::InputFloat("From (sec)##from", &fromTime, 0.01f,0.1f))
+            {
+                if (fromTime < toTime) n.spawnTime = fromTime;
+			}
+            if (ImGui::InputFloat("To (sec)##to", &toTime, 0.01f, 0.1f))
+            {
+                if (toTime > n.GetSpawnTime()) n.time = toTime;
+            }
 
             ImGui::Spacing();
 
@@ -1796,7 +1902,7 @@ void Game::Render()
         for (int i = 0; i < (int)notes.size(); i++)
         {
             const auto& note = notes[i];
-            if (note.note == FLICK_RIGHT || note.note == FLICK_LEFT) continue;
+            if (note.note == FLICK_RIGHT || note.note == FLICK_LEFT || note.note == LONGNOTE) continue;
             float et = note.time;
             float st = note.GetSpawnTime();
 
@@ -1865,17 +1971,90 @@ void Game::Render()
                 ? DirectX::SimpleMath::Vector3(1.0f, 0.4f, 0.4f)
                 : DirectX::SimpleMath::Vector3(0.4f, 0.6f, 1.0f);
 
-            // まずは0度・180度で試すのが一番安全（±90度は前後軸の取り方次第で対称に見えることがある）
-            float RotationY = (note.note == FLICK_RIGHT) ? -1.57f : 1.57f;
+            float RotationX = (note.note == FLICK_RIGHT) ? 0.0f : 3.14f;
+			float RotationZ = (note.note == FLICK_RIGHT) ? -1.57f : -1.57f;
 
-            float scale = 100.0f;
+            float scale = 2.0f;
             DirectX::SimpleMath::Matrix world =
                 DirectX::SimpleMath::Matrix::CreateScale(scale) *
-                DirectX::SimpleMath::Matrix::CreateRotationY(RotationY) *
+                DirectX::SimpleMath::Matrix::CreateRotationX(RotationX) *
+                DirectX::SimpleMath::Matrix::CreateRotationZ(RotationZ) *
                 DirectX::SimpleMath::Matrix::CreateTranslation(pos);
 
             m_flickModel->SetTintColor(tint);
             m_flickModel->Draw(context, *m_states, world, m_view, m_proj);
+        }
+    }
+
+
+    {
+        constexpr float kGraceTime = 0.5f; // arrivalTime を過ぎても動き続ける猶予時間
+        constexpr float kBodySpacing = 0.005f;
+		constexpr float kOverlapSentan = 0.025f; // dou/oに食い込ませる猶予（秒）。モデルサイズに応じて調整
+		constexpr float kOverlapO = 0.005f; // sentan/douに食い込ませる猶予（秒）。モデルサイズに応じて調整
+
+        for (int i = 0; i < (int)notes.size(); ++i)
+        {
+            auto& note = notes[i];
+            if (note.note != LONGNOTE) continue;
+
+            float displayStart = note.GetSpawnTime();  // 表示開始
+            float arrivalTime = note.arrivalTime;      // 先端(sentan)が判定ラインに着く時刻
+            float endTime = note.time;              // 終端(o)が判定ラインに着く時刻(=消える予定)
+            float holdDuration = endTime - arrivalTime;   // ロングノーツの長さ（sentanとoの時間差）
+
+            if (arrivalTime - displayStart <= 0.0001f) continue;
+            if (holdDuration <= 0.0001f) holdDuration = 0.0001f; // 保険
+
+            float facingAngle = CalcFacingAngleY(note.spawnPos, note.judgePos);
+            Matrix rotFlipped = Matrix::CreateRotationY(facingAngle + XM_PI);
+
+            // ── 全体の表示可否（猶予込みでoが消えるまで） ──
+            float extendedEnd = endTime + kGraceTime;
+            if (musicTime < displayStart || musicTime > extendedEnd) continue;
+
+            // ── sentan（先端）の現在時刻：arrivalTimeを過ぎてもkGraceTimeだけ進み続ける ──
+            float sentanTime = std::min(musicTime, arrivalTime + kGraceTime);
+            Vector3 sentanPos = EvaluateLongNotePos(note, sentanTime);
+
+            // 1) sentan 描画
+            {
+                Matrix world = Matrix::CreateScale(20.0f) * rotFlipped * Matrix::CreateTranslation(sentanPos);
+                if (m_Long_Sentan_Model) m_Long_Sentan_Model->Draw(context, *m_states, world, m_view, m_proj);
+            }
+
+            // ── o（終端）の現在時刻：sentanよりholdDurationだけ遅れて追従 ──
+            float tailTime = sentanTime - holdDuration;
+            bool  tailVisible = (tailTime >= displayStart);
+            if (tailVisible)
+            {
+                Vector3 oPos = EvaluateLongNotePos(note, tailTime);
+
+                // 3) o 描画
+                Matrix world = Matrix::CreateScale(20.0f) * rotFlipped * Matrix::CreateTranslation(oPos);
+                if (m_Long_O_Model) m_Long_O_Model->Draw(context, *m_states, world, m_view, m_proj);
+            }
+
+            // 2) dou（チェーン本体）：tailTime～sentanTimeの間だけを均等分割してサンプリング
+            {
+                float bodyStart = (tailVisible ? tailTime : displayStart) - kOverlapSentan; // oに食い込む
+                float bodyEnd = sentanTime + kOverlapO;                              // sentanに食い込む
+                bodyStart = std::max(bodyStart, displayStart);
+                float bodyDuration = bodyEnd - bodyStart;
+                if (bodyDuration > 0.0001f)
+                {
+                    int bodySegments = std::max(2, (int)std::ceil(bodyDuration / kBodySpacing));
+                    for (int s = 0; s < bodySegments; ++s)
+                    {
+                        float p = (float)s / (float)(bodySegments - 1);
+                        float sampleTime = bodyStart + bodyDuration * p;
+
+                        Vector3 pos = EvaluateLongNotePos(note, sampleTime);
+                        Matrix world = Matrix::CreateScale(10.0f) * rotFlipped * Matrix::CreateTranslation(pos);
+                        if (m_Long_Dou_Model) m_Long_Dou_Model->Draw(context, *m_states, world, m_view, m_proj);
+                    }
+                }
+            }
         }
     }
 
@@ -2729,6 +2908,7 @@ void Game::DrawThickBeam(const DirectX::SimpleMath::Vector3& from, const DirectX
         );
     }
 }
+
 
 #pragma region Direct3D Resources
 

@@ -20,6 +20,7 @@
 #include "sound.h"
 #include <memory>
 #include <Model.h>
+#include <DeviceResources.h>
 
 enum class BGMstate
 {
@@ -213,6 +214,9 @@ private:
 	std::unique_ptr<FbxModel> m_flickModel;
 	std::unique_ptr<FbxModel> m_playerModel;
 	std::unique_ptr<FbxModel> m_enemyModel;
+	std::unique_ptr<FbxModel> m_Long_Sentan_Model;
+	std::unique_ptr<FbxModel> m_Long_Dou_Model;
+	std::unique_ptr<FbxModel> m_Long_O_Model;
     std::unique_ptr<DirectX::IEffectFactory> m_fxFactory;
     Microsoft::WRL::ComPtr<ID3D11InputLayout> m_inputLayout;
 
@@ -269,6 +273,8 @@ private:
         float thicknessFrom, float thicknessTo,
 		DirectX::XMVECTORF32 coreColor,DirectX::XMVECTORF32 glowColor);
 
+	static float CalcFacingAngleY(const DirectX::SimpleMath::Vector3& from, const DirectX::SimpleMath::Vector3& to);
+
     DirectX::SimpleMath::Vector3 cameraPos = { 0.0f, -800.0f, -200.0f };
     // レーン中心(X=0)、判定ラインZ=-210〜出現Z=1000あたりの中間くらいの高さで側面から
     DirectX::XMFLOAT3 m_camSidePos = { 0.0f, 0.0f, 800.0f };  // 400 → 800くらいに
@@ -319,6 +325,12 @@ private:
     bool ViewMode = false;
     float noteTime;
     float breakTime = -100.0f;
+
+    static int m_longLane;
+    static float m_longTime;
+    static float m_longDuration;
+    static DirectX::SimpleMath::Vector3 EvaluteChainPartPosition(const Note& note, float now, float leadOffset);
+	static DirectX::SimpleMath::Vector3 EvaluateLongNotePosition(const Note& note, float now);
 
     float highSpeed = 0.1f;
     static constexpr float kHighSpeedMin = 0.25f;

@@ -5,6 +5,7 @@
 enum NoteType
 {
     TAP,
+    LONGNOTE,
     FLICK_RIGHT,
 	FLICK_LEFT,
 };
@@ -17,9 +18,11 @@ public:
     float y;    // Y座標
     float time; //判定時刻
     float spawnTime = 1.0f;    //出現時刻(-1ならtime = -2.0f)
+	float arrivalTime = 1.0f;  //到達時刻
     float startLong;
     float endLong;
     float lenght;   //ビーム用
+	float holdDuration = 0.0f; //ロングノーツ用
     NoteType note = TAP;
 
 

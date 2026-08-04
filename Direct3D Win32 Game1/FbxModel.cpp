@@ -6,6 +6,7 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 #include <filesystem>
+#include <functional>
 
 using namespace DirectX;
 using namespace DirectX::SimpleMath;
@@ -50,29 +51,49 @@ bool FbxModel::Load(ID3D11Device* device, const std::wstring& fbxPath, const std
 
     std::vector<VertexPositionNormalTexture> vbData;
 
-    // 全メッシュを1つの頂点バッファにまとめる（複数パーツのモデルにも対応）
-    for (unsigned int m = 0; m < scene->mNumMeshes; m++)
-    {
-        aiMesh* mesh = scene->mMeshes[m];
-        for (unsigned int f = 0; f < mesh->mNumFaces; f++)
+    // ── ノード階層を再帰的に辿り、各メッシュにワールド変換を適用してから頂点を集める ──
+    std::function<void(aiNode*, const aiMatrix4x4&)> processNode =
+        [&](aiNode* node, const aiMatrix4x4& parentTransform)
         {
-            const aiFace& face = mesh->mFaces[f];
-            if (face.mNumIndices != 3) continue; // Triangulate済みなので基本3のはず
+            aiMatrix4x4 nodeTransform = parentTransform * node->mTransformation;
 
-            for (unsigned int idx = 0; idx < 3; idx++)
+            for (unsigned int i = 0; i < node->mNumMeshes; i++)
             {
-                unsigned int vi = face.mIndices[idx];
-                aiVector3D p = mesh->mVertices[vi];
-                aiVector3D n = mesh->HasNormals() ? mesh->mNormals[vi] : aiVector3D(0, 1, 0);
-                aiVector3D uv = mesh->HasTextureCoords(0) ? mesh->mTextureCoords[0][vi] : aiVector3D(0, 0, 0);
+                aiMesh* mesh = scene->mMeshes[node->mMeshes[i]];
 
-                vbData.push_back(VertexPositionNormalTexture(
-                    Vector3(p.x, p.y, p.z),
-                    Vector3(n.x, n.y, n.z),
-                    Vector2(uv.x, uv.y)));
+                // 法線変換用(移動成分を除いた行列)
+                aiMatrix3x3 normalMat(nodeTransform);
+
+                for (unsigned int f = 0; f < mesh->mNumFaces; f++)
+                {
+                    const aiFace& face = mesh->mFaces[f];
+                    if (face.mNumIndices != 3) continue;
+
+                    for (unsigned int idx = 0; idx < 3; idx++)
+                    {
+                        unsigned int vi = face.mIndices[idx];
+
+                        aiVector3D p = nodeTransform * mesh->mVertices[vi]; // ← ワールド変換を適用
+
+                        aiVector3D n = mesh->HasNormals() ? mesh->mNormals[vi] : aiVector3D(0, 1, 0);
+                        n = normalMat * n; // ← 法線にも回転を適用
+                        n.Normalize();
+
+                        aiVector3D uv = mesh->HasTextureCoords(0) ? mesh->mTextureCoords[0][vi] : aiVector3D(0, 0, 0);
+
+                        vbData.push_back(VertexPositionNormalTexture(
+                            Vector3(p.x, p.y, p.z),
+                            Vector3(n.x, n.y, n.z),
+                            Vector2(uv.x, uv.y)));
+                    }
+                }
             }
-        }
-    }
+
+            for (unsigned int c = 0; c < node->mNumChildren; c++)
+                processNode(node->mChildren[c], nodeTransform);
+        };
+
+    processNode(scene->mRootNode, aiMatrix4x4()); // ルートから開始(単位行列)
 
     if (vbData.empty())
     {
