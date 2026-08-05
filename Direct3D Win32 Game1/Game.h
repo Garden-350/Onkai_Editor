@@ -188,6 +188,7 @@ public:
 
     void JudggeLane(char key, int laneIndex);
     void JudggeFlickNotes();
+    void JudggeLongNoteHold();
 
     void UpdateCamera();
 

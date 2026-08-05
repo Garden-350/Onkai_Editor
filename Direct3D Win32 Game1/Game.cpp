@@ -67,6 +67,9 @@ constexpr float kPerfect = 0.02f;
 constexpr float kGreat = 0.04f;
 constexpr float kGud = 0.06f;
 
+//ロングノーツのティックインターバル
+constexpr float kLongTickInterval = 0.02f;
+
 // ─────────────────────────────────────────────
 // LerpVector3 : 2つのVector3を線形補間する
 //   a, b : 補間元・補間先
@@ -883,6 +886,7 @@ void Game::Update(DX::StepTimer const& timer)
     for (int i = (int)notes.size() - 1; i >= 0; i--)
     {
         if (notes[i].note == FLICK_RIGHT || notes[i].note == FLICK_LEFT) continue;
+        if (notes[i].note == LONGNOTE) continue;
         if (musicTime - notes[i].time > kGud)
         {
             notes.erase(notes.begin() + i);
@@ -908,6 +912,7 @@ void Game::Update(DX::StepTimer const& timer)
             JudggeLane(Ik.key, Ik.laneIndex);
 
         JudggeFlickNotes();
+		JudggeLongNoteHold();   //ロングノーツの判定
     }
     //else
     //{
@@ -1113,7 +1118,7 @@ void Game::Render()
         {
             ImGui::SeparatorText("Hold Duration");
             static float longDurationInput = 1.0f;
-            ImGui::InputFloat("Duration (sec)##long", &longDurationInput, 0.1f);
+            //ImGui::InputFloat("Duration (sec)##long", &longDurationInput, 0.1f);
             if (longDurationInput < 0.05f) longDurationInput = 0.05f;
             m_TempNote.holdDuration = longDurationInput;
 		}
@@ -1305,13 +1310,20 @@ void Game::Render()
             //2.到達時刻 = arrivalTime(判定ラインに到達する時刻)
             //3.終了時刻 = time(通り過ぎて消える)
             ImGui::SeparatorText("Timeline Settings");
-			ImGui::InputFloat("Display Start Time (sec)", &n.spawnTime, 0.01f);
+			float prevSpawnTime = n.spawnTime;  //編集前の値を保持
+
+            if (ImGui::InputFloat("Display Start Time (sec)", &n.spawnTime, 0.01f))
+            {
+				float delta = n.spawnTime - prevSpawnTime; //変更量
+				n.arrivalTime += delta; //到達時刻も同じだけ変更
+				n.time += delta; //終了時刻も同じだけ変更
+            }
 			ImGui::InputFloat("Arrival Time (sec)", &n.arrivalTime, 0.01f);
 			ImGui::InputFloat("End Time (sec)", &n.time, 0.01f);
 
             //整合性チェック
             if(n.arrivalTime <= n.GetSpawnTime())
-				n.arrivalTime = n.GetSpawnTime() + 0.01f;
+				n.arrivalTime = n.GetSpawnTime() + 0.1f;    //出現から到達までの時間を絶対に+0.1s以上に設定する。これ以下にすると高速で飛んでいくバグが起きる（バグというかそれ以下の時間で到達するには高速で飛ばないと行けないからそう見える）
             if(n.time <= n.arrivalTime)
 				n.time = n.arrivalTime + 0.01f;
 
@@ -2253,9 +2265,11 @@ void Game::OnWindowSizeChanged(int width, int height)
 //     }
 // ─────────────────────────────────────────────
 //namespace fs = std::filesystem; // IntelliSenseの誤検知対策も兼ねたエイリアス
+// ─────────────────────────────────────────────
+// SaveChart : 譜面を JSON ファイルへ保存
+// ─────────────────────────────────────────────
 void Game::SaveChart(std::string name)
 {
-    //chartsフォルダがなければ作成
     std::error_code ec;
     std::filesystem::create_directories("charts", ec);
     if (ec)
@@ -2285,34 +2299,44 @@ void Game::SaveChart(std::string name)
     file << "\"notes\":[\n";
     for (size_t i = 0; i < notes.size(); i++)
     {
+        const auto& n = notes[i];
         file << "{";
-        file << "\"lane\":" << notes[i].lane << ",";
-        file << "\"type\":" << notes[i].note << ",";
-        file << "\"time\":" << notes[i].time;
+        file << "\"lane\":" << n.lane << ",";
+        file << "\"type\":" << n.note << ",";
+        file << "\"time\":" << n.time;               // End time
 
-        if (notes[i].spawnTime >= 0.0f)
-            file << ",\"spawnTime\":" << notes[i].spawnTime;
+        if (n.spawnTime >= 0.0f)
+            file << ",\"spawnTime\":" << n.spawnTime;
 
-        file << ",\"spawnPos\":{"   
-            << "\"x\":" << notes[i].spawnPos.x << ","
-            << "\"y\":" << notes[i].spawnPos.y << ","
-            << "\"z\":" << notes[i].spawnPos.z << "}";
+        // arrivalTime（ロングノーツの先端到達時刻。TAP等でも念のため保存）
+        file << ",\"arrivalTime\":" << n.arrivalTime;
 
-        file << ",\"judgePos\":{"   
-            << "\"x\":" << notes[i].judgePos.x << ","
-            << "\"y\":" << notes[i].judgePos.y << ","
-            << "\"z\":" << notes[i].judgePos.z << "}";
+        // フリック終点レーン（未設定なら-1のまま保存）
+        file << ",\"flickLaneTo\":" << n.flickLaneTo;
 
-        if (!notes[i].controlPoints.empty())
+        // ロングノーツの保持時間
+        file << ",\"holdDuration\":" << n.holdDuration;
+
+        file << ",\"spawnPos\":{"
+            << "\"x\":" << n.spawnPos.x << ","
+            << "\"y\":" << n.spawnPos.y << ","
+            << "\"z\":" << n.spawnPos.z << "}";
+
+        file << ",\"judgePos\":{"
+            << "\"x\":" << n.judgePos.x << ","
+            << "\"y\":" << n.judgePos.y << ","
+            << "\"z\":" << n.judgePos.z << "}";
+
+        if (!n.controlPoints.empty())
         {
             file << ",\"path\":[";
-            for (size_t p = 0; p < notes[i].controlPoints.size(); p++)
+            for (size_t p = 0; p < n.controlPoints.size(); p++)
             {
-                auto& cp = notes[i].controlPoints[p];
+                auto& cp = n.controlPoints[p];
                 file << "{\"x\":" << cp.x
-                    << ",\"y\":" << cp.y 
+                    << ",\"y\":" << cp.y
                     << ",\"z\":" << cp.z << "}";
-                if (p != notes[i].controlPoints.size() - 1) file << ",";
+                if (p != n.controlPoints.size() - 1) file << ",";
             }
             file << "]";
         }
@@ -2322,7 +2346,7 @@ void Game::SaveChart(std::string name)
     }
     file << "],\n";
 
-    // ビーム
+    // ビーム（配置エディタ用のBeamsリスト）
     file << "\"beams\":[\n";
     for (size_t i = 0; i < beams.size(); i++)
     {
@@ -2333,6 +2357,21 @@ void Game::SaveChart(std::string name)
             << "\"warningTime\":" << beams[i].warningTime;
         file << "}";
         if (i != beams.size() - 1) file << ",";
+        file << "\n";
+    }
+    file << "],\n";
+
+    // ホーミングビーム（homingBeams）
+    file << "\"homingBeams\":[\n";
+    for (size_t i = 0; i < homingBeams.size(); i++)
+    {
+        const auto& b = homingBeams[i];
+        file << "{";
+        file << "\"chargeTime\":" << b.chargeTime << ",";
+        file << "\"lockTime\":" << b.lockTime << ",";
+        file << "\"hitTime\":" << b.hitTime;
+        file << "}";
+        if (i != homingBeams.size() - 1) file << ",";
         file << "\n";
     }
     file << "],\n";
@@ -2368,17 +2407,14 @@ void Game::SaveChart(std::string name)
     else
     {
         g_chartStatusMessage = "Saved charts/" + name + ".json (notes:" +
-            std::to_string(notes.size()) + ")";
+            std::to_string(notes.size()) + ", beams:" + std::to_string(homingBeams.size()) + ")";
         g_chartStatusIsError = false;
     }
     OutputDebugStringA(("[SaveChart]" + g_chartStatusMessage + "\n").c_str());
 }
+
 // ─────────────────────────────────────────────
 // LoadChart : JSON ファイルから譜面を読み込む
-//
-//   spawnPos / judgePos が存在しない旧フォーマットの場合は
-//   レーン番号から自動計算してデフォルト値を設定する。
-//   meta / judgeCircles が無い旧フォーマットも読み込める（後方互換）。
 // ─────────────────────────────────────────────
 void Game::LoadChart(std::string name)
 {
@@ -2404,14 +2440,16 @@ void Game::LoadChart(std::string name)
     }
     notes.clear();
     beams.clear();
+    homingBeams.clear();
 
-    //メタ情報(なければ現在地を維持)===============================================================
+    // メタ情報（なければ現状維持）
     if (j.contains("meta"))
     {
         if (j["meta"].contains("bpm")) bpm = j["meta"]["bpm"].get<float>();
         if (j["meta"].contains("totalBeat")) totalBeat = j["meta"]["totalBeat"].get<float>();
     }
-    //ノーツ=================================================================
+
+    // ノーツ
     if (j.contains("notes"))
     {
         for (const auto& n : j["notes"])
@@ -2420,6 +2458,9 @@ void Game::LoadChart(std::string name)
             note.lane = n["lane"].get<int>();
             note.note = static_cast<NoteType>(n["type"].get<int>());
             note.time = n["time"].get<float>();
+
+            if (n.contains("spawnTime"))
+                note.spawnTime = n["spawnTime"].get<float>();
 
             if (n.contains("spawnPos"))
             {
@@ -2445,6 +2486,24 @@ void Game::LoadChart(std::string name)
                 note.judgePos = { laneX, -55.0f, -210.0f };
             }
 
+            // arrivalTime（旧フォーマット互換：無ければ time と同じにしておく）
+            if (n.contains("arrivalTime"))
+                note.arrivalTime = n["arrivalTime"].get<float>();
+            else
+                note.arrivalTime = note.time;
+
+            // フリック終点レーン（無ければ未設定=-1）
+            if (n.contains("flickLaneTo"))
+                note.flickLaneTo = n["flickLaneTo"].get<int>();
+            else
+                note.flickLaneTo = -1;
+
+            // ロングノーツの保持時間（無ければ arrivalTime と time の差から逆算）
+            if (n.contains("holdDuration"))
+                note.holdDuration = n["holdDuration"].get<float>();
+            else
+                note.holdDuration = std::max(0.05f, note.time - note.arrivalTime);
+
             if (n.contains("path"))
             {
                 for (const auto& p : n["path"])
@@ -2461,7 +2520,8 @@ void Game::LoadChart(std::string name)
         std::sort(notes.begin(), notes.end(),
             [](const Note& a, const Note& b) { return a.time < b.time; });
     }
-    //ビーム==============================================================
+
+    // ビーム
     if (j.contains("beams"))
     {
         for (const auto& b : j["beams"])
@@ -2474,13 +2534,30 @@ void Game::LoadChart(std::string name)
             ));
         }
     }
-    //判定円のキーフレーム===============================================
+
+    // ホーミングビーム
+    if (j.contains("homingBeams"))
+    {
+        for (const auto& b : j["homingBeams"])
+        {
+            HomingBeam hb;
+            hb.chargeTime = b["chargeTime"].get<float>();
+            hb.lockTime = b["lockTime"].get<float>();
+            hb.hitTime = b["hitTime"].get<float>();
+            InitBeamScatter(hb);
+            homingBeams.push_back(hb);
+        }
+        std::sort(homingBeams.begin(), homingBeams.end(),
+            [](const HomingBeam& a, const HomingBeam& c) { return a.lockTime < c.lockTime; });
+    }
+
+    // 判定円のキーフレーム
     if (j.contains("judgeCircles"))
     {
         for (const auto& jc : j["judgeCircles"])
         {
             int lane = jc["lane"].get<int>();
-            if (lane < 0 || lane >= (int)judggeCircles.size())continue;
+            if (lane < 0 || lane >= (int)judggeCircles.size()) continue;
 
             auto& circle = judggeCircles[lane];
             circle.keyframe.clear();
@@ -2499,19 +2576,23 @@ void Game::LoadChart(std::string name)
                 });
         }
     }
-    //ロード後の状態リセット
+
+    // ロード後の状態リセット
     sound.Stop(SOUND_LABEL_BGM001);
     bgmstate = BGMstate::stop;
     musicTime = 0.0f;
     editorBeat = 0.0f;
     success = 0;
     miss = 0;
+    perfect = 0;
+    great = 0;
+    good = 0;
     selectedNoteIndex = -1;
     m_EditorState = EditorState::IDLE;
     originalNotes = notes;
 
     g_chartStatusMessage = "Loaded: charts/" + name + ".json (notes:" +
-        std::to_string(notes.size()) + ")";
+        std::to_string(notes.size()) + ", beams:" + std::to_string(homingBeams.size()) + ")";
     g_chartStatusIsError = false;
     OutputDebugStringA(("[LoadChart]" + g_chartStatusMessage + "\n").c_str());
 }
@@ -2525,6 +2606,8 @@ void Game::JudggeLane(char key, int laneIndex)
     m_prevLaneKeyDown[laneIndex] = isDown; // 次フレーム用に記録
 
     if (!pressedThisFrame) return; // 押した瞬間でなければ何もしない
+
+    //TAPノーツの判定
     int targetLane = laneIndex;
     int bestIndex = -1;
     float bestDiff = 9999.9f;   //大きい数字を一回代入
@@ -2534,6 +2617,7 @@ void Game::JudggeLane(char key, int laneIndex)
     {
         if(notes[i].lane != targetLane) continue;
         if(notes[i].note == FLICK_RIGHT || notes[i].note == FLICK_LEFT) continue;
+		if (notes[i].note == LONGNOTE) continue;   //ロングノーツは判定しない
 
         float diff = fabsf(notes[i].time - musicTime);  //時間差で判定
         if (diff < bestDiff)
@@ -2542,32 +2626,78 @@ void Game::JudggeLane(char key, int laneIndex)
             bestIndex = i;
         }
     }
-    if (bestIndex == -1) return;
+    //if (bestIndex == -1) return;
 
-    if (bestDiff > kGud) return;    //判定圏外ならスルー
+    //if (bestDiff > kGud) return;    //判定圏外ならスルー
 
-    int rank =
-        (bestDiff < kPerfect) ? 0 :
-        (bestDiff < kGreat) ? 1 : 2;
-    m_judggeEffects[laneIndex].rank = rank;
-    m_judggeEffects[laneIndex].timer = 0.5f;
-    if (rank == 0)
+    if(bestIndex != -1 && bestDiff <= kGud)
     {
-        perfect++;
-    }
-    else if (rank == 1)
-    {
-        great++;
-    }
-    else if(rank == 2)
-    {
-        good++;
+        int rank =
+            (bestDiff < kPerfect) ? 0 :
+            (bestDiff < kGreat) ? 1 : 2;
+        m_judggeEffects[laneIndex].rank = rank;
+        m_judggeEffects[laneIndex].timer = 0.5f;
+        if (rank == 0)
+        {
+            perfect++;
+        }
+        else if (rank == 1)
+        {
+            great++;
+        }
+        else if (rank == 2)
+        {
+            good++;
+        }
+        //sound.Play(タップの音);
+
+        notes.erase(notes.begin() + bestIndex);
+        success++;
+        return; //TAPを処理したからロングの処理はしない
     }
 
-    notes.erase(notes.begin() + bestIndex);
-    success++;
+ //   //ロングノーツの判定
+ //   int bestLongIndex = -1;
+	//float bestLongDiff = 9999.9f;
 
+ //   for(int i = 0; i < (int)notes.size(); i++)
+ //   {
+ //       if(notes[i].lane != targetLane) continue;
+ //       if(notes[i].note != LONGNOTE) continue;
+	//	if (notes[i].longStarted || notes[i].longFailed) continue;   //すでに判定済みのロングノーツはスルー
 
+ //       float diff = fabsf(notes[i].arrivalTime - musicTime);  //timeではなくarrivalTimeで判定
+ //       if (diff < bestLongDiff)
+ //       {
+ //           bestLongDiff = diff;
+ //           bestLongIndex = i;
+ //       }
+	//}
+ //   if (bestLongIndex != -1 && bestLongDiff <= kGud)
+ //   {
+	//	auto& n = notes[bestLongIndex];
+ //       int rank =
+ //           (bestLongDiff < kPerfect) ? 0 :
+	//		(bestLongDiff < kGreat) ? 1 : 2;
+
+ //       m_judggeEffects[laneIndex].rank = rank;
+ //       m_judggeEffects[laneIndex].timer = 0.5f;
+ //       if (rank == 0)
+ //       {
+ //           perfect++;
+ //       }
+ //       else if (rank == 1)
+ //       {
+ //           great++;
+ //       }
+ //       else if (rank == 2)
+ //       {
+ //           good++;
+	//	}
+	//	//sound.Play(ロングの音);
+ //       n.longStarted = true;
+ //       n.nextTickTime = n.arrivalTime + kLongTickInterval;
+ //   }
 }
 
 // JudgeFlickNotes : 横フリック判定（時間ベース）
@@ -2637,6 +2767,77 @@ void Game::JudggeFlickNotes()
             notes.erase(notes.begin() + i);
             miss++;
 		}
+    }
+}
+
+// JudggeLongNoteHold : 開始済みのロングノーツを毎フレームチェックする
+// 押しっぱなしでない場合 → 即ミス
+// endTime まで押しっぱなしだった場合 → パフェ(succcess++だけ加算、追加ランクなし)
+void Game::JudggeLongNoteHold()
+{
+    for (int i = (int)notes.size() - 1; i >= 0; i--)
+    {
+        auto& n = notes[i];
+        if (n.note != NoteType::LONGNOTE) continue;
+        if (n.longFailed) continue;
+
+        if (n.lane < 0 || n.lane >= (int)std::size(kLaneKeys)) continue;
+        char key = kLaneKeys[n.lane].key;
+        bool isDown = (GetAsyncKeyState(key) & 0x8000) != 0;
+
+        if (!n.longStarted)
+        {
+            float diff = n.arrivalTime - musicTime;
+            if (isDown && fabsf(diff) <= kGud)
+            {
+                float absDiff = fabsf(diff);
+                int rank = (absDiff < kPerfect) ? 0 : (absDiff < kGreat) ? 1 : 2;
+                m_judggeEffects[n.lane].rank = rank;
+                m_judggeEffects[n.lane].timer = 0.5f;
+                if (rank == 0) perfect++;
+                else if (rank == 1) great++;
+                else good++;
+
+                n.longStarted = true;
+                n.nextTickTime = n.arrivalTime + kLongTickInterval;
+            }
+            else if (diff < -kGud)
+            {
+                miss++;
+                notes.erase(notes.begin() + i);
+            }
+            continue;
+        }
+
+        //先にtickを消化する
+        if (isDown)
+        {
+            while (n.nextTickTime <= musicTime && n.nextTickTime < n.time)
+            {
+                perfect++;
+                m_judggeEffects[n.lane].rank = 0;
+                m_judggeEffects[n.lane].timer = 0.2f;
+                // sound.Play(継続音);
+                n.nextTickTime += kLongTickInterval;
+            }
+        }
+
+        //終了チェック（tickの後にする)
+        if (musicTime >= n.time)
+        {
+            if (isDown) success++;
+            else        miss++;
+            notes.erase(notes.begin() + i);
+            continue;
+        }
+
+        //離していたら即ミス
+        if (!isDown)
+        {
+            n.longFailed = true;
+            miss++;
+            notes.erase(notes.begin() + i);
+        }
     }
 }
 

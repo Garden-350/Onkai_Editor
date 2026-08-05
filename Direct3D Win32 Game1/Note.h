@@ -25,6 +25,10 @@ public:
 	float holdDuration = 0.0f; //ロングノーツ用
     NoteType note = TAP;
 
+	bool longStarted = false; //開始判定(sentan到達)が完了しているかどうか
+    bool longFailed = false;    //途中でキーを離すとかで失敗したかどうか
+	float nextTickTime = 0.0f; //ロングノーツ用：次に判定をする時間(musicTime準拠)
+
 
     //3D座標
     DirectX::SimpleMath::Vector3 spawnPos = { 0.0f,-55.0f,1000.0f };    //出現位置
