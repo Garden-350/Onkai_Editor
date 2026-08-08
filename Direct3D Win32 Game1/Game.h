@@ -333,7 +333,7 @@ private:
     static DirectX::SimpleMath::Vector3 EvaluteChainPartPosition(const Note& note, float now, float leadOffset);
 	static DirectX::SimpleMath::Vector3 EvaluateLongNotePosition(const Note& note, float now);
 
-    float highSpeed = 0.1f;
+    float highSpeed = 1.0f;
     static constexpr float kHighSpeedMin = 0.25f;
     static constexpr float kHighSpeedMax = 10.0f;
     static constexpr float kHighSpeedStep = 0.25f;

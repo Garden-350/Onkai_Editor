@@ -33,6 +33,12 @@ std::vector<Note>  originalNotes;  // 再生前のノーツ状態を退避して
 static char filename[64] = "chartname"; // セーブ／ロード時のファイル名バッファ
 static std::string g_chartStatusMessage;    //save/loadの結果メッセ
 static bool g_chartStatusIsError = false;   //成功：false 失敗: true
+//static float g_defaultTravelTime = 1.2f;
+//static float g_noteSpeed = 700.0f; // ノーツの移動速度（ワールド単位/秒）。大きいほど速く飛んでくる
+//static float g_minTravelTime = 0.3f; // 距離が近すぎる場合の最低保証時間（秒）。0除算防止も兼ねる
+static float g_approachBeats = 2.0f;   // 判定ラインに到達するまで何拍分の余裕を持たせるか
+static float g_minTravelTime = 0.3f;   // 距離が近すぎる/BPMが低すぎる場合の最低保証時間（0除算防止も兼ねる）
+
 NoteType currentNoteType = TAP;    // 現在選択中のノーツ種別
 
 
@@ -68,7 +74,7 @@ constexpr float kGreat = 0.04f;
 constexpr float kGud = 0.06f;
 
 //ロングノーツのティックインターバル
-constexpr float kLongTickInterval = 0.02f;
+constexpr float kLongTickInterval = 0.2f;
 
 // ─────────────────────────────────────────────
 // LerpVector3 : 2つのVector3を線形補間する
@@ -649,8 +655,17 @@ void Game::Update(DX::StepTimer const& timer)
                 m_TempNote.judgePos = { worldX, worldPos.y, worldZ };
                 if (m_TempNote.note == FLICK_RIGHT || m_TempNote.note == FLICK_LEFT)
                     m_TempNote.judgePos = { 0.0f, m_TempNote.judgePos.y, -210.0f }; // ← 到達位置はX=0, Z=-210固定
-                if (m_TempNote.time <= m_TempNote.spawnTime)
-                    m_TempNote.time = m_TempNote.spawnTime + 0.1f; // 時刻の整合性チェック
+
+                // ── BPM連動で移動時間を決定 ──
+                // 「g_approachBeats拍前」に出現するようにtimeを逆算する。
+                // これにより、距離やBPMに関わらず常に同じ体感速度で降ってくる。
+                {
+                    float secondsPerBeat = (bpm > 0.0f) ? 60.0f / bpm : 0.5f;
+                    float travelTime = g_approachBeats * secondsPerBeat;
+                    if (travelTime < g_minTravelTime) travelTime = g_minTravelTime; // 極端に速いBPM等での保険
+                    m_TempNote.time = m_TempNote.spawnTime + travelTime;
+                }
+
                 notes.push_back(m_TempNote);
                 // 判定時刻でソート（常に昇順を維持）
                 std::sort(notes.begin(), notes.end(),
@@ -883,16 +898,20 @@ void Game::Update(DX::StepTimer const& timer)
 	//}
 
     //ミス判定
-    for (int i = (int)notes.size() - 1; i >= 0; i--)
+    if (bgmstate == BGMstate::play)
     {
-        if (notes[i].note == FLICK_RIGHT || notes[i].note == FLICK_LEFT) continue;
-        if (notes[i].note == LONGNOTE) continue;
-        if (musicTime - notes[i].time > kGud)
+        for (int i = (int)notes.size() - 1; i >= 0; i--)
         {
-            notes.erase(notes.begin() + i);
-            miss++;
+            if (notes[i].note == FLICK_RIGHT || notes[i].note == FLICK_LEFT) continue;
+            if (notes[i].note == LONGNOTE) continue;
+            if (musicTime - notes[i].time > kGud)
+            {
+                notes.erase(notes.begin() + i);
+                miss++;
+            }
         }
     }
+
 
     for (int i = 0; i < 6; i++)
     {
@@ -1055,6 +1074,9 @@ void Game::Render()
             ImGui::TextColored(ImVec4(0.6f, 1.0f, 1.0f, 1.0f),
                 "Placement Height: %.1f (Shift+Wheel to adjust)", m_PlacementHeight);
         }
+        ImGui::SliderFloat("Approach Beats (HS-like)", &g_approachBeats, 0.5f, 8.0f);
+        ImGui::SliderFloat("Min Travel Time (sec)", &g_minTravelTime, 0.1f, 1.0f);
+        ImGui::TextDisabled("New notes: travelTime = approachBeats * (60/bpm)  [BPM=%.0f]", bpm);
 
         // ── ノーツ種別選択ボタン ─────────────────
         const char* noteNames[] = { "TAP", "LONG","FLICK_RIGHT", "FLICK_LEFT" };
@@ -1150,6 +1172,8 @@ void Game::Render()
 				m_TempNote.lane = savedLane; // 保存したレーンを復元
 				m_TempNote.flickLaneTo = savedFlickLaneTo; // 保存したフリック終点レーンを復元
 				m_TempNote.holdDuration = savedHoldDuration; // 保存したロングノーツの保持時間を復元
+
+                m_PlacementHeight = 150.0f;
 
                 m_EditorState = EditorState::PLACING_SPAWN;
             }
@@ -1320,6 +1344,23 @@ void Game::Render()
             }
 			ImGui::InputFloat("Arrival Time (sec)", &n.arrivalTime, 0.01f);
 			ImGui::InputFloat("End Time (sec)", &n.time, 0.01f);
+            // Selected Note パネル内、Timeline Settings セクションの末尾あたりに追加
+            if (ImGui::Button("Recalc from BPM (Approach Beats)"))
+            {
+                float secondsPerBeat = (bpm > 0.0f) ? 60.0f / bpm : 0.5f;
+                float travelTime = g_approachBeats * secondsPerBeat;
+                if (travelTime < g_minTravelTime) travelTime = g_minTravelTime;
+
+                if (n.note == LONGNOTE)
+                {
+                    n.arrivalTime = n.GetSpawnTime() + travelTime;
+                    if (n.time <= n.arrivalTime) n.time = n.arrivalTime + 0.1f; // holdDurationは維持されないので必要なら別途調整
+                }
+                else
+                {
+                    n.time = n.GetSpawnTime() + travelTime;
+                }
+            }
 
             //整合性チェック
             if(n.arrivalTime <= n.GetSpawnTime())
@@ -2005,52 +2046,50 @@ void Game::Render()
 		constexpr float kOverlapSentan = 0.025f; // dou/oに食い込ませる猶予（秒）。モデルサイズに応じて調整
 		constexpr float kOverlapO = 0.005f; // sentan/douに食い込ませる猶予（秒）。モデルサイズに応じて調整
 
+
         for (int i = 0; i < (int)notes.size(); ++i)
         {
             auto& note = notes[i];
             if (note.note != LONGNOTE) continue;
 
-            float displayStart = note.GetSpawnTime();  // 表示開始
-            float arrivalTime = note.arrivalTime;      // 先端(sentan)が判定ラインに着く時刻
-            float endTime = note.time;              // 終端(o)が判定ラインに着く時刻(=消える予定)
-            float holdDuration = endTime - arrivalTime;   // ロングノーツの長さ（sentanとoの時間差）
+            float displayStart = note.GetSpawnTime();
+            float arrivalTime = note.arrivalTime;
+            float endTime = note.time;
+            float holdDuration = endTime - arrivalTime;
 
             if (arrivalTime - displayStart <= 0.0001f) continue;
-            if (holdDuration <= 0.0001f) holdDuration = 0.0001f; // 保険
+            if (holdDuration <= 0.0001f) holdDuration = 0.0001f;
 
             float facingAngle = CalcFacingAngleY(note.spawnPos, note.judgePos);
             Matrix rotFlipped = Matrix::CreateRotationY(facingAngle + XM_PI);
 
-            // ── 全体の表示可否（猶予込みでoが消えるまで） ──
+            // 全体の表示可否（oが消えた後、余韻分だけ表示継続）
             float extendedEnd = endTime + kGraceTime;
             if (musicTime < displayStart || musicTime > extendedEnd) continue;
 
-            // ── sentan（先端）の現在時刻：arrivalTimeを過ぎてもkGraceTimeだけ進み続ける ──
-            float sentanTime = std::min(musicTime, arrivalTime + kGraceTime);
+            // sentanはEndTimeまで進み続ける（endTime到達=oが判定ラインに届く瞬間）
+            float sentanTime = std::min(musicTime, endTime);
             Vector3 sentanPos = EvaluateLongNotePos(note, sentanTime);
 
-            // 1) sentan 描画
             {
                 Matrix world = Matrix::CreateScale(20.0f) * rotFlipped * Matrix::CreateTranslation(sentanPos);
                 if (m_Long_Sentan_Model) m_Long_Sentan_Model->Draw(context, *m_states, world, m_view, m_proj);
             }
 
-            // ── o（終端）の現在時刻：sentanよりholdDurationだけ遅れて追従 ──
+            // oの現在時刻：sentanよりholdDurationだけ遅れて追従
             float tailTime = sentanTime - holdDuration;
             bool  tailVisible = (tailTime >= displayStart);
             if (tailVisible)
             {
                 Vector3 oPos = EvaluateLongNotePos(note, tailTime);
-
-                // 3) o 描画
                 Matrix world = Matrix::CreateScale(20.0f) * rotFlipped * Matrix::CreateTranslation(oPos);
                 if (m_Long_O_Model) m_Long_O_Model->Draw(context, *m_states, world, m_view, m_proj);
             }
 
-            // 2) dou（チェーン本体）：tailTime～sentanTimeの間だけを均等分割してサンプリング
+            // dou（本体）：tailTime～sentanTimeを均等分割
             {
-                float bodyStart = (tailVisible ? tailTime : displayStart) - kOverlapSentan; // oに食い込む
-                float bodyEnd = sentanTime + kOverlapO;                              // sentanに食い込む
+                float bodyStart = (tailVisible ? tailTime : displayStart) - kOverlapSentan;
+                float bodyEnd = sentanTime + kOverlapO;
                 bodyStart = std::max(bodyStart, displayStart);
                 float bodyDuration = bodyEnd - bodyStart;
                 if (bodyDuration > 0.0001f)
@@ -2060,7 +2099,6 @@ void Game::Render()
                     {
                         float p = (float)s / (float)(bodySegments - 1);
                         float sampleTime = bodyStart + bodyDuration * p;
-
                         Vector3 pos = EvaluateLongNotePos(note, sampleTime);
                         Matrix world = Matrix::CreateScale(10.0f) * rotFlipped * Matrix::CreateTranslation(pos);
                         if (m_Long_Dou_Model) m_Long_Dou_Model->Draw(context, *m_states, world, m_view, m_proj);
@@ -2779,13 +2817,13 @@ void Game::JudggeLongNoteHold()
     {
         auto& n = notes[i];
         if (n.note != NoteType::LONGNOTE) continue;
-        if (n.longFailed) continue;
-
         if (n.lane < 0 || n.lane >= (int)std::size(kLaneKeys)) continue;
+
         char key = kLaneKeys[n.lane].key;
         bool isDown = (GetAsyncKeyState(key) & 0x8000) != 0;
 
-        if (!n.longStarted)
+        // ── まだ開始していない場合：開始判定 ──
+        if (!n.longStarted && !n.longFailed)
         {
             float diff = n.arrivalTime - musicTime;
             if (isDown && fabsf(diff) <= kGud)
@@ -2803,39 +2841,38 @@ void Game::JudggeLongNoteHold()
             }
             else if (diff < -kGud)
             {
+                // 開始を逃した → Failed扱いにするだけで、ノーツは消さない
+                n.longFailed = true;
                 miss++;
-                notes.erase(notes.begin() + i);
             }
-            continue;
+            // ウィンドウ内で待機中はまだ何もしない（生存させ続ける）
         }
-
-        //先にtickを消化する
-        if (isDown)
+        // ── 開始済み・まだ成功継続中 ──
+        else if (n.longStarted && !n.longFailed)
         {
-            while (n.nextTickTime <= musicTime && n.nextTickTime < n.time)
+            if (isDown)
             {
-                perfect++;
-                m_judggeEffects[n.lane].rank = 0;
-                m_judggeEffects[n.lane].timer = 0.2f;
-                // sound.Play(継続音);
-                n.nextTickTime += kLongTickInterval;
+                while (n.nextTickTime <= musicTime && n.nextTickTime < n.time)
+                {
+                    perfect++;
+                    m_judggeEffects[n.lane].rank = 0;
+                    m_judggeEffects[n.lane].timer = 0.2f;
+                    // sound.Play(継続音);
+                    n.nextTickTime += kLongTickInterval;
+                }
+            }
+            else
+            {
+                // 離した瞬間 → Failedにするが、ノーツはEndTimeまで残す（見た目は最後まで流れる）
+                n.longFailed = true;
+                miss++;
             }
         }
 
-        //終了チェック（tickの後にする)
+        // ── 終端に到達したら消去（ここでのみ notes.erase する）──
         if (musicTime >= n.time)
         {
-            if (isDown) success++;
-            else        miss++;
-            notes.erase(notes.begin() + i);
-            continue;
-        }
-
-        //離していたら即ミス
-        if (!isDown)
-        {
-            n.longFailed = true;
-            miss++;
+            if (!n.longFailed) success++;
             notes.erase(notes.begin() + i);
         }
     }
