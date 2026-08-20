@@ -151,6 +151,19 @@ void Sound::Uninit(void)
 		}
 	}
 
+	if (m_pDynamicVoice)
+	{
+		m_pDynamicVoice->Stop(0);
+		m_pDynamicVoice->FlushSourceBuffers();
+		m_pDynamicVoice->DestroyVoice();
+		m_pDynamicVoice = nullptr;
+	}
+	if (m_dynamicData)
+	{
+		delete[] m_dynamicData;
+		m_dynamicData = nullptr;
+	}
+
 	if(m_pMasteringVoice)m_pMasteringVoice->DestroyVoice();
 
 	if (m_pXAudio2) m_pXAudio2->Release();
@@ -249,6 +262,174 @@ void Sound::SetVolume(SOUND_LABEL label, float volume)
 	if (m_pSourceVoice[(int)label] == nullptr) return;
 
 	m_pSourceVoice[(int)label]->SetVolume(volume);
+}
+
+HRESULT Sound::LoadDynamic(const std::string& path, bool loop)
+{
+	HRESULT hr = S_OK;
+
+	if (m_pDynamicVoice)
+	{
+		m_pDynamicVoice->Stop(0);
+		m_pDynamicVoice->FlushSourceBuffers();
+		m_pDynamicVoice->DestroyVoice();
+		m_pDynamicVoice = nullptr;
+	}
+	if (m_dynamicData)
+	{
+		delete[] m_dynamicData;
+		m_dynamicData = nullptr;
+	}
+	m_dynamicPlayPos = 0;
+	memset(&m_dynamicWfx, 0, sizeof(m_dynamicWfx));
+	memset(&m_dynamicBuffer, 0, sizeof(m_dynamicBuffer));
+
+	std::string ext = path.substr(path.find_last_of(".") + 1);
+	for (auto& c : ext) c = (char)tolower((unsigned char)c);
+
+	if (ext == "mp3")
+	{
+		DWORD dataSize = 0;
+		hr = LoadMp3AsPCM(path.c_str(), m_dynamicWfx, m_dynamicData, dataSize);
+		if (FAILED(hr))
+		{
+			OutputDebugStringA(("[Sound] LoadDynamic(mp3) failed: " + path + "\n").c_str());
+			return hr;
+		}
+		m_dynamicBuffer.AudioBytes = dataSize;
+		m_dynamicBuffer.pAudioData = m_dynamicData;
+		m_dynamicBuffer.Flags = XAUDIO2_END_OF_STREAM;
+		m_dynamicBuffer.LoopCount = loop ? XAUDIO2_LOOP_INFINITE : 0;
+	}
+	else
+	{
+		HANDLE hFile = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL,
+			OPEN_EXISTING, 0, NULL);
+		if (hFile == INVALID_HANDLE_VALUE)
+		{
+			OutputDebugStringA(("[Sound] LoadDynamic(wav) file not found: " + path + "\n").c_str());
+			return HRESULT_FROM_WIN32(GetLastError());
+		}
+		if (SetFilePointer(hFile, 0, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER)
+		{
+			CloseHandle(hFile);
+			return HRESULT_FROM_WIN32(GetLastError());
+		}
+
+		DWORD dwChunkSize = 0, dwChunkPosition = 0, filetype = 0;
+
+		FindChunk(hFile, fourccRIFF, dwChunkSize, dwChunkPosition);
+		ReadChunkData(hFile, &filetype, sizeof(DWORD), dwChunkPosition);
+		if (filetype != fourccWAVE)
+		{
+			CloseHandle(hFile);
+			OutputDebugStringA(("[Sound] LoadDynamic: not a WAVE file: " + path + "\n").c_str());
+			return S_FALSE;
+		}
+
+		FindChunk(hFile, fourccFMT, dwChunkSize, dwChunkPosition);
+		ReadChunkData(hFile, &m_dynamicWfx, dwChunkSize, dwChunkPosition);
+
+		FindChunk(hFile, fourccDATA, dwChunkSize, dwChunkPosition);
+		m_dynamicData = new BYTE[dwChunkSize];
+		ReadChunkData(hFile, m_dynamicData, dwChunkSize, dwChunkPosition);
+
+		CloseHandle(hFile);
+
+		m_dynamicBuffer.AudioBytes = dwChunkSize;
+		m_dynamicBuffer.pAudioData = m_dynamicData;
+		m_dynamicBuffer.Flags = XAUDIO2_END_OF_STREAM;
+		m_dynamicBuffer.LoopCount = loop ? XAUDIO2_LOOP_INFINITE : 0;
+	}
+
+	hr = m_pXAudio2->CreateSourceVoice(&m_pDynamicVoice, &(m_dynamicWfx.Format));
+	if (FAILED(hr))
+	{
+		OutputDebugStringA(("[Sound] LoadDynamic: CreateSourceVoice failed: " + path + "\n").c_str());
+		delete[] m_dynamicData;
+		m_dynamicData = nullptr;
+		return hr;
+	}
+
+	m_dynamicLoop = loop;
+	m_dynamicLoadedPath = path;
+	OutputDebugStringA(("[Sound] LoadDynamic OK: " + path + "\n").c_str());
+	return S_OK;
+}
+
+void Sound::PlayDynamic()
+{
+	if (!m_pDynamicVoice) return;
+
+	XAUDIO2_BUFFER buffer = m_dynamicBuffer;
+	buffer.PlayBegin = m_dynamicPlayPos;
+	buffer.PlayLength = 0;
+	buffer.LoopCount = m_dynamicLoop ? XAUDIO2_LOOP_INFINITE : 0;
+
+	m_pDynamicVoice->Stop(0);
+	m_pDynamicVoice->FlushSourceBuffers();
+	m_pDynamicVoice->SubmitSourceBuffer(&buffer);
+	m_pDynamicVoice->Start(0);
+}
+
+void Sound::StopDynamic()
+{
+	if (!m_pDynamicVoice) return;
+	m_pDynamicVoice->Stop(0);
+	m_pDynamicVoice->FlushSourceBuffers();
+	m_dynamicPlayPos = 0;
+}
+
+void Sound::PauseDynamic()
+{
+	if (!m_pDynamicVoice) return;
+	m_pDynamicVoice->Stop(0);
+
+	XAUDIO2_VOICE_STATE state;
+	m_pDynamicVoice->GetState(&state);
+	m_dynamicPlayPos = (UINT32)state.SamplesPlayed;
+}
+
+void Sound::ResumeDynamic()
+{
+	PlayDynamic();
+}
+
+void Sound::SetPlayPositionSecondsDynamic(float seconds)
+{
+	if (seconds < 0.0f) seconds = 0.0f;
+
+	const UINT32 sampleRate = m_dynamicWfx.Format.nSamplesPerSec;
+	const UINT32 blockAlign = m_dynamicWfx.Format.nBlockAlign;
+	const UINT32 totalSamples = blockAlign > 0 ? m_dynamicBuffer.AudioBytes / blockAlign : 0;
+
+	UINT32 sample = (UINT32)(seconds * sampleRate);
+	if (totalSamples > 0 && sample >= totalSamples)
+		sample = totalSamples - 1;
+
+	m_dynamicPlayPos = sample;
+}
+
+void Sound::SeekSecondsDynamic(float seconds)
+{
+	SetPlayPositionSecondsDynamic(seconds);
+	PlayDynamic();
+}
+
+void Sound::SetVolumeDynamic(float volume)
+{
+	if (!m_pDynamicVoice) return;
+	m_pDynamicVoice->SetVolume(volume);
+}
+
+float Sound::GetDynamicDurationSeconds() const
+{
+	const UINT32 sampleRate = m_dynamicWfx.Format.nSamplesPerSec;
+	const UINT32 blockAlign = m_dynamicWfx.Format.nBlockAlign;
+	if (sampleRate == 0 || blockAlign == 0) return 0.0f;
+
+	const UINT32 totalSamples = m_dynamicBuffer.AudioBytes / blockAlign;
+	return (float)totalSamples / (float)sampleRate;
 }
 
 

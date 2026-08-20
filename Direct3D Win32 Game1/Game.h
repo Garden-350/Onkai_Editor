@@ -201,6 +201,9 @@ public:
     // Properties
     void GetDefaultSize(int& width, int& height) const noexcept;
 
+    std::string m_AudioFileName = "";
+    char m_AudioFileBuf[128] = "";
+
 private:
     Sound sound;
     std::string name;
@@ -257,6 +260,7 @@ private:
     float chartPosX = 0.0f;
     float currentBeat = 0.0f;
     float m_PlacementHeight = -55.0f; // 配置基準面のY座標(上下方法は後々)
+    float m_AudioDurationSeconds = 0.0f;    //読み込んだ曲の長さによって調整される（自動）
 
     //ビーム配置UI用の一時入力値
     float m_newBeamChargeTime = 0.0f;

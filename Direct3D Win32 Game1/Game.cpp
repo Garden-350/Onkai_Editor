@@ -651,6 +651,7 @@ void Game::Update(DX::StepTimer const& timer)
                 break;
 
             case EditorState::PLACING_JUDGE:
+            {
                 // ノーツ配置ステップ2：判定位置(judgePos)を決定 → ノーツをリストへ追加
                 m_TempNote.judgePos = { worldX, worldPos.y, worldZ };
                 if (m_TempNote.note == FLICK_RIGHT || m_TempNote.note == FLICK_LEFT)
@@ -662,17 +663,44 @@ void Game::Update(DX::StepTimer const& timer)
                 {
                     float secondsPerBeat = (bpm > 0.0f) ? 60.0f / bpm : 0.5f;
                     float travelTime = g_approachBeats * secondsPerBeat;
-                    if (travelTime < g_minTravelTime) travelTime = g_minTravelTime; // 極端に速いBPM等での保険
-                    m_TempNote.time = m_TempNote.spawnTime + travelTime;
+                    if (travelTime < g_minTravelTime) travelTime = g_minTravelTime;
+
+                    if (m_TempNote.note == LONGNOTE)
+                    {
+                        m_TempNote.arrivalTime = m_TempNote.spawnTime + travelTime;
+                        m_TempNote.time = m_TempNote.arrivalTime + m_TempNote.holdDuration; // holdDuration分だけ後ろにEndTimeを置く
+                    }
+                    else
+                    {
+                        m_TempNote.time = m_TempNote.spawnTime + travelTime;
+                    }
                 }
 
                 notes.push_back(m_TempNote);
-                // 判定時刻でソート（常に昇順を維持）
+
+                // ポインタ or 識別できる一時マーカーを使って、ソート後の位置を特定する
+                Note* justAdded = &notes.back(); // ソート前のアドレスを保持しても vector 移動で無効になるので注意
+
                 std::sort(notes.begin(), notes.end(),
                     [](const Note& a, const Note& b) { return a.time < b.time; });
-                selectedNoteIndex = (int)notes.size() - 1;
+
+                // ソート後に実際の位置を検索し直す（時刻とスポーン位置などユニークな組み合わせで判定）
+                selectedNoteIndex = -1;
+                for (int i = 0; i < (int)notes.size(); i++)
+                {
+                    if (notes[i].time == m_TempNote.time &&
+                        notes[i].spawnPos.x == m_TempNote.spawnPos.x &&
+                        notes[i].spawnPos.z == m_TempNote.spawnPos.z)
+                    {
+                        selectedNoteIndex = i;
+                        break;
+                    }
+                }
+
                 m_EditorState = EditorState::EDITING;
                 break;
+            }
+
 
             default:
                 break;
@@ -734,23 +762,21 @@ void Game::Update(DX::StepTimer const& timer)
             // 再生開始：ノーツ状態を退避し、エディタ位置から BGM 再生
             originalNotes = notes;
             musicTime = editorBeat * (60.0f / bpm);
-            sound.SetPlayPositionSeconds(SOUND_LABEL_BGM001, musicTime);
-            sound.Play(SOUND_LABEL_BGM001);
+            sound.SetPlayPositionSecondsDynamic(musicTime);
+            sound.PlayDynamic();
             bgmstate = BGMstate::play;
             break;
 
         case BGMstate::play:
             // 一時停止：ノーツを退避前の状態に戻す
             notes = originalNotes;
-            success = 0;
-            miss = 0;
-            sound.Pause(SOUND_LABEL_BGM001);
+            sound.PauseDynamic();
             bgmstate = BGMstate::pause;
             break;
 
         case BGMstate::pause:
             // 再開：BGM の再生を再スタート
-            sound.Resume(SOUND_LABEL_BGM001);
+            sound.ResumeDynamic();
             bgmstate = BGMstate::play;
             if (mirrorMode == true) mirrorMode = !mirrorMode;
             break;
@@ -926,6 +952,35 @@ void Game::Update(DX::StepTimer const& timer)
     {
         if (highSpeed < 0.0f) highSpeed = 0.0f;
         musicTime += elapsedTime * highSpeed; // ハイスピード倍率をかけて進む
+
+        if (m_AudioDurationSeconds > 0.0f && musicTime >= m_AudioDurationSeconds)
+        {
+            musicTime = 0.0f;
+            editorBeat = 0.0f;
+            //ノーツとかも戻す
+            notes = originalNotes;
+            success = 0;
+            miss = 0;
+            perfect = 0;
+            great = 0;
+            good = 0;
+            for (auto& beam : homingBeams)
+            {
+                beam.state = BeamState::Homing;
+                beam.searchBeatsPlayed = 0;
+                beam.lockSoundPlayed = false;
+                beam.fireSoundPlayed = false;
+                beam.judgmentLocked = false;
+                beam.fireBeam = false;
+            }
+            //最後まで行って最初から再生する場合こっち
+            //sound.SetPlayPositionSecondsDynamic(0.0f);
+            //sound.PlayDynamic();
+
+            //最後まで行って止まってほしい場合はこっち
+            sound.StopDynamic();
+            bgmstate = BGMstate::stop;
+        }
 
         for (const auto& Ik : kLaneKeys)
             JudggeLane(Ik.key, Ik.laneIndex);
@@ -1200,6 +1255,12 @@ void Game::Render()
         // ── セーブ / ロード ─────────────────────
         ImGui::SeparatorText("Fire");
         ImGui::InputText("##filename", filename, 64);
+        //曲のファイルネームを入力後絶対に一度セーブ＆ロードを実行
+        ImGui::SeparatorText("Audio");
+        ImGui::InputText("Audio File (e.g. bgm001.wav)", m_AudioFileBuf, sizeof(m_AudioFileBuf));
+        m_AudioFileName = m_AudioFileBuf;
+        if (!m_AudioFileName.empty())
+            ImGui::TextDisabled("-> asset/bgm/%s", m_AudioFileBuf);
         if (ImGui::Button("Save", ImVec2(90, 0)))
         {
             if (mirrorMode) mirrorMode = false;
@@ -1465,7 +1526,7 @@ void Game::Render()
             m_ChartH = chartH;
             chartPosX = pos.x;
 
-            bpm = 120;
+            //bpm = 120;
             float secondPerBeat = 60.0f / bpm;
             currentBeat = (bgmstate == BGMstate::play)
                 ? musicTime / secondPerBeat
@@ -1959,18 +2020,22 @@ void Game::Render()
             float et = note.time;
             float st = note.GetSpawnTime();
 
-            DirectX::SimpleMath::Vector3 pos;
-            if (bgmstate != BGMstate::play)
-            {
-                pos = note.spawnPos;
-            }
-            else
-            {
-                if (now < st || now > et) continue; // 表示範囲外はスキップ
-                pos = EvaluateNotePosition(note, now);
-            }
-
+            if (now < st || now > et) continue;
+            DirectX::SimpleMath::Vector3 pos = EvaluateNotePosition(note, now);
             DirectX::SimpleMath::Vector3 tint;
+
+            //DirectX::SimpleMath::Vector3 pos;
+            //if (bgmstate != BGMstate::play)
+            //{
+            //    pos = note.spawnPos;
+            //}
+            //else
+            //{
+            //    if (now < st || now > et) continue; // 表示範囲外はスキップ
+            //    pos = EvaluateNotePosition(note, now);
+            //}
+
+            //DirectX::SimpleMath::Vector3 tint;
             switch (note.lane)
             {
             case 0: tint = { 1.0f, 0.3f, 0.3f }; break; // 赤（S）
@@ -2006,16 +2071,17 @@ void Game::Render()
             if (note.note != FLICK_RIGHT && note.note != FLICK_LEFT) continue;
             float et = note.time;
             float st = note.GetSpawnTime();
-            DirectX::SimpleMath::Vector3 pos;
-            if (bgmstate != BGMstate::play)
-            {
-                pos = note.spawnPos;
-            }
-            else
-            {
-                if (now < st || now > et) continue; // 表示範囲外はスキップ
-                pos = EvaluateNotePosition(note, now);
-            }
+            if (now < st || now > et) continue;
+            DirectX::SimpleMath::Vector3 pos = EvaluateNotePosition(note, now);
+            //if (bgmstate != BGMstate::play)
+            //{
+            //    pos = note.spawnPos;
+            //}
+            //else
+            //{
+            //    if (now < st || now > et) continue; // 表示範囲外はスキップ
+            //    pos = EvaluateNotePosition(note, now);
+            //}
 			float dirScaleX = (note.note == FLICK_RIGHT) ? 1.0f : -1.0f;    //反転するか否か
 
             // スケールは常に正の値（反転は使わない）
@@ -2065,10 +2131,10 @@ void Game::Render()
 
             // 全体の表示可否（oが消えた後、余韻分だけ表示継続）
             float extendedEnd = endTime + kGraceTime;
-            if (musicTime < displayStart || musicTime > extendedEnd) continue;
+            if (now < displayStart || now > extendedEnd) continue;
 
             // sentanはEndTimeまで進み続ける（endTime到達=oが判定ラインに届く瞬間）
-            float sentanTime = std::min(musicTime, endTime);
+            float sentanTime = std::min(now, endTime);
             Vector3 sentanPos = EvaluateLongNotePos(note, sentanTime);
 
             {
@@ -2143,18 +2209,16 @@ void Game::Render()
             case BGMstate::stop:
                 originalNotes = notes;
                 musicTime = editorBeat * (60.0f / bpm);
-                sound.SetPlayPositionSeconds(SOUND_LABEL_BGM001, musicTime);
-                sound.Play(SOUND_LABEL_BGM001);
+                sound.SetPlayPositionSecondsDynamic(musicTime);
+                sound.PlayDynamic();
                 bgmstate = BGMstate::play;
                 break;
             case BGMstate::play:
-                notes = originalNotes;
-                success = 0; miss = 0;
-                sound.Pause(SOUND_LABEL_BGM001);
+                sound.PauseDynamic();
                 bgmstate = BGMstate::pause;
                 break;
             case BGMstate::pause:
-                sound.Resume(SOUND_LABEL_BGM001);
+                sound.ResumeDynamic();
                 bgmstate = BGMstate::play;
                 break;
             }
@@ -2163,7 +2227,7 @@ void Game::Render()
         // 先頭に戻るボタン
         if (ImGui::Button("BACK", ImVec2(80, 0)))
         {
-            sound.Stop(SOUND_LABEL_BGM001);
+            sound.StopDynamic();
             musicTime = 0.0f;
             bgmstate = BGMstate::stop;
             notes = originalNotes;
@@ -2175,7 +2239,9 @@ void Game::Render()
         float timelineSeconds = (bgmstate == BGMstate::play)
             ? musicTime
             : editorBeat * secondsPerBeat;
-        float songLengthSeconds = totalBeat * secondsPerBeat;
+        float songLengthSeconds = (m_AudioDurationSeconds > 0.0f)
+            ? m_AudioDurationSeconds
+            : totalBeat * secondsPerBeat;   //曲が読み込まれてなかったらこっち
 
         ImGui::SameLine();
         ImGui::SetNextItemWidth(260.0f);
@@ -2193,9 +2259,9 @@ void Game::Render()
             editorBeat = timelineSeconds / secondsPerBeat;
 
             if (bgmstate == BGMstate::play)
-                sound.SeekSeconds(SOUND_LABEL_BGM001, musicTime);
+                sound.SeekSecondsDynamic(musicTime);
             else
-                sound.SetPlayPositionSeconds(SOUND_LABEL_BGM001, musicTime);
+                sound.SetPlayPositionSecondsDynamic(musicTime);
         }
 
         // 時刻・スコア表示
@@ -2330,7 +2396,8 @@ void Game::SaveChart(std::string name)
     // メタ情報
     file << "\"meta\":{"
         << "\"bpm\":" << bpm << ","
-        << "\"totalBeat\":" << totalBeat
+        << "\"totalBeat\":" << totalBeat << ","
+        << "\"audioFile\":\"" << m_AudioFileName << "\""
         << "},\n";
 
     // ノーツ
@@ -2485,6 +2552,30 @@ void Game::LoadChart(std::string name)
     {
         if (j["meta"].contains("bpm")) bpm = j["meta"]["bpm"].get<float>();
         if (j["meta"].contains("totalBeat")) totalBeat = j["meta"]["totalBeat"].get<float>();
+        
+        if (j["meta"].contains("audioFile"))
+        {
+            m_AudioFileName = j["meta"]["audioFile"].get<std::string>();
+            strncpy_s(m_AudioFileBuf, m_AudioFileName.c_str(), sizeof(m_AudioFileBuf) - 1);
+            std::string fullPath = "asset/bgm/" + m_AudioFileName;
+            HRESULT hr = sound.LoadDynamic(fullPath, true);
+            if (FAILED(hr))
+            {
+                g_chartStatusMessage += " [WARNING: audio load failed: " + fullPath + "]";
+                g_chartStatusIsError = true;
+                m_AudioDurationSeconds = 0.0f;
+            }
+            else
+            {
+                m_AudioDurationSeconds = sound.GetDynamicDurationSeconds(); //曲の長さを取得
+            }
+        }
+        else
+        {
+            m_AudioFileName.clear();
+            m_AudioFileBuf[0] = '\0';
+            m_AudioDurationSeconds = 0.0f;
+        }
     }
 
     // ノーツ

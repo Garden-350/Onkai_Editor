@@ -1,6 +1,7 @@
 #pragma once
 
 #include <xaudio2.h>
+#include <string>
 
 // サウンドファイル
 typedef enum
@@ -50,6 +51,13 @@ private:
 	BYTE* m_DataBuffer[SOUND_LABEL_MAX];
 
 	UINT32 m_playPos[SOUND_LABEL_MAX] = { 0 };
+	IXAudio2SourceVoice* m_pDynamicVoice = nullptr;
+	WAVEFORMATEXTENSIBLE  m_dynamicWfx = {};
+	XAUDIO2_BUFFER        m_dynamicBuffer = {};
+	BYTE* m_dynamicData = nullptr;
+	UINT32                m_dynamicPlayPos = 0;
+	bool                  m_dynamicLoop = true;
+	std::string           m_dynamicLoadedPath;
 
 	HRESULT FindChunk(HANDLE, DWORD, DWORD&, DWORD&);
 	HRESULT ReadChunkData(HANDLE, void*, DWORD, DWORD);
@@ -78,4 +86,13 @@ public:
 
 	void SetVolume(SOUND_LABEL label, float volume);
 
+	HRESULT LoadDynamic(const std::string& path, bool loop = true);
+	void PlayDynamic();
+	void StopDynamic();
+	void PauseDynamic();
+	void ResumeDynamic();
+	void SetPlayPositionSecondsDynamic(float seconds);
+	void SeekSecondsDynamic(float seconds);
+	void SetVolumeDynamic(float volume);
+	float GetDynamicDurationSeconds() const;
 };
