@@ -44,6 +44,22 @@ enum class BeamState
 	Resolved
 };
 
+enum class GameMode 
+{
+    Edit2D,
+    Play2D,
+    Play3D
+};
+
+enum class DragHandle
+{
+    None,
+    Spawn,
+    Arrival,
+    Whole,
+    End
+};
+
 struct Beams {
     int lane;
     float time;
@@ -149,6 +165,7 @@ struct JudggeCircle {
 };
 
 
+
 // A basic game implementation that creates a D3D11 device and
 // provides a game loop.
 class Game final : public DX::IDeviceNotify
@@ -184,6 +201,8 @@ public:
     void OnWindowSizeChanged(int width, int height);
     void SaveChart(std::string name);
     void LoadChart(std::string name);
+
+    void DrawNoteEditorView(float regionX, float regionY, float regionW, float regionH);
 
 
     void JudggeLane(char key, int laneIndex);
@@ -239,6 +258,11 @@ private:
         int rank = -1;  // 0=PERFECT, 1=GREAT, 2=GUD, 3=MISS -1=非表示
         float timer = 0.0f; //何秒表示させるか
     };
+
+    // 2D Editor 用の座標変換範囲(ワールドX座標の描画範囲)
+    static constexpr float kEditorWorldXMin = -330.0f;
+    static constexpr float kEditorWorldXMax = 330.0f;
+
     JudggeEffect m_judggeEffects[6];
 
     const int LANE_COUNT = 6;
@@ -261,6 +285,8 @@ private:
     float currentBeat = 0.0f;
     float m_PlacementHeight = -55.0f; // 配置基準面のY座標(上下方法は後々)
     float m_AudioDurationSeconds = 0.0f;    //読み込んだ曲の長さによって調整される（自動）
+    float m_EditorScrollTime = 0.0f;
+    float m_EditorPxPerSec = 150.0f;
 
     //ビーム配置UI用の一時入力値
     float m_newBeamChargeTime = 0.0f;
@@ -294,6 +320,9 @@ private:
     int m_camState = 0; //0=NONE 1=ORBIT 2=TRACK 3=DOLLY 4=FLIGHT
     POINT m_camOldPos = {};
 
+    int   m_EditorSnapDivision = 4;
+    int m_DraggingNoteIndex = -1;
+
     int center = 0;
     int totalBeat = 1000;
     int beatsPerMeasure = 4;
@@ -321,8 +350,11 @@ private:
     bool LongStartPlaced = false;
     bool isOutRange = false;
     bool m_prevLaneKeyDown[6] = { false, false, false, false, false, false };
+    bool m_Placing2DArmed = false;
 
     BGMstate bgmstate = BGMstate::stop;
+    GameMode m_GameMode = GameMode::Edit2D;
+    DragHandle m_DragHandle = DragHandle::None;
 
     bool mouseDown = GetAsyncKeyState(VK_LBUTTON) & 0x8000;
     bool mousePressed = GetAsyncKeyState(VK_LBUTTON) & 0x0001;
@@ -330,6 +362,7 @@ private:
     bool ViewMode = false;
     float noteTime;
     float breakTime = -100.0f;
+    float noteScale = 1.25f;
 
     static int m_longLane;
     static float m_longTime;
@@ -337,7 +370,7 @@ private:
     static DirectX::SimpleMath::Vector3 EvaluteChainPartPosition(const Note& note, float now, float leadOffset);
 	static DirectX::SimpleMath::Vector3 EvaluateLongNotePosition(const Note& note, float now);
 
-    float highSpeed = 1.0f;
+    float highSpeed = 6.0f; //こっちは音ゲーのハイスピの方
     static constexpr float kHighSpeedMin = 0.25f;
     static constexpr float kHighSpeedMax = 10.0f;
     static constexpr float kHighSpeedStep = 0.25f;
@@ -372,6 +405,12 @@ private:
     float playerMoveRange = 70.0f; // 左右移動の振れ幅
     float playerVisualX = 0.0f; //見た目用の現在のX座標（補間）
     float playerMoveSpeed = 800.0f; //1秒あたりにどれぐらい動けるか
+
+
+    //ノーツ選択一覧
+    Note m_DragOriginalNote;
+    float m_DragStartMouseTime = 0.0f;
+    int m_DragStartMouseLane = 0;
 
     void Update(DX::StepTimer const& timer);
     void Render();

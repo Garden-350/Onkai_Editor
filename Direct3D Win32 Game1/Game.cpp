@@ -76,6 +76,8 @@ constexpr float kGud = 0.06f;
 //ロングノーツのティックインターバル
 constexpr float kLongTickInterval = 0.2f;
 
+constexpr float kNoteY = 0.0f;
+
 // ─────────────────────────────────────────────
 // LerpVector3 : 2つのVector3を線形補間する
 //   a, b : 補間元・補間先
@@ -87,6 +89,59 @@ static DirectX::SimpleMath::Vector3 LerpVector3(
     float t)
 {
     return a + (b - a) * t;
+}
+
+static float GetArrivalTime(const Note& note)
+{
+    return (note.note == LONGNOTE) ? note.arrivalTime : note.time;
+}
+
+//t = 0.0 : spawnPos / t = 1.0f : judgePos
+static DirectX::SimpleMath::Vector3 EvaluateNotePositionAtT(
+    const Note& note, float t
+)
+{
+    t = std::clamp(t, 0.0f, 1.0f);
+
+    const auto& p0 = note.spawnPos;
+    const auto& p3 = note.judgePos;
+
+    if (note.controlPoints.empty())
+        return LerpVector3(p0, p3, t);
+
+    if (note.controlPoints.size() == 1)
+    {
+        const auto& p1 = note.controlPoints[0];
+        return LerpVector3(
+            LerpVector3(p0, p1, t),
+            LerpVector3(p1, p3, t), t
+        );
+    }
+    const auto& p1 = note.controlPoints[0];
+    const auto& p2 = note.controlPoints[1];
+
+    auto a = LerpVector3(p0, p1, t);
+    auto b = LerpVector3(p1, p2, t);
+    auto c = LerpVector3(p2, p3, t);
+
+    return LerpVector3(
+        LerpVector3(a, b, t),
+        LerpVector3(b, c, t), t);
+}
+
+//指定した時間でベジェとかの経路を見る
+static DirectX::SimpleMath::Vector3 EvaluateNotePositionBetWeen(
+    const Note& note,
+    float now,
+    float startTime,
+    float arrivalTime
+)
+{
+    float duration = arrivalTime - startTime;
+    if (duration < 0.00001f)duration = 0.000001f;
+
+    float t = (now - startTime) / duration;
+    return EvaluateNotePositionAtT(note, t);
 }
 
 // ─────────────────────────────────────────────
@@ -103,37 +158,76 @@ static DirectX::SimpleMath::Vector3 LerpVector3(
 static DirectX::SimpleMath::Vector3 EvaluateNotePosition(
     const Note& note, float now)
 {
-    float startTime = note.GetSpawnTime();
-    float endTime = note.time;
-    float duration = endTime - startTime;
-    if (duration < 0.0001f) duration = 0.0001f; // ゼロ除算防止
+    //float startTime = note.GetSpawnTime();
+    //float endTime = note.time;
+    //float duration = endTime - startTime;
+    //if (duration < 0.0001f) duration = 0.0001f; // ゼロ除算防止
 
-    // 正規化された補間係数 t を [0,1] にクランプ
-    float t = (now - startTime) / duration;
-    if (t < 0.0f) t = 0.0f;
-    if (t > 1.0f) t = 1.0f;
+    //// 正規化された補間係数 t を [0,1] にクランプ
+    //float t = (now - startTime) / duration;
+    //if (t < 0.0f) t = 0.0f;
+    //if (t > 1.0f) t = 1.0f;
 
-    const auto& p0 = note.spawnPos;
-    const auto& p3 = note.judgePos;
+    //const auto& p0 = note.spawnPos;
+    //const auto& p3 = note.judgePos;
 
-    // 制御点なし → 直線補間
-    if (note.controlPoints.empty())
-        return LerpVector3(p0, p3, t);
+    //// 制御点なし → 直線補間
+    //if (note.controlPoints.empty())
+    //    return LerpVector3(p0, p3, t);
 
-    // 制御点1個 → 2次ベジェ
-    if (note.controlPoints.size() == 1)
-    {
-        const auto& p1 = note.controlPoints[0];
-        return LerpVector3(LerpVector3(p0, p1, t), LerpVector3(p1, p3, t), t);
-    }
+    //// 制御点1個 → 2次ベジェ
+    //if (note.controlPoints.size() == 1)
+    //{
+    //    const auto& p1 = note.controlPoints[0];
+    //    return LerpVector3(LerpVector3(p0, p1, t), LerpVector3(p1, p3, t), t);
+    //}
 
-    // 制御点2個 → 3次ベジェ（De Casteljau アルゴリズム）
-    const auto& p1 = note.controlPoints[0];
-    const auto& p2 = note.controlPoints[1];
-    auto a = LerpVector3(p0, p1, t);
-    auto b = LerpVector3(p1, p2, t);
-    auto c = LerpVector3(p2, p3, t);
-    return LerpVector3(LerpVector3(a, b, t), LerpVector3(b, c, t), t);
+    //// 制御点2個 → 3次ベジェ（De Casteljau アルゴリズム）
+    //const auto& p1 = note.controlPoints[0];
+    //const auto& p2 = note.controlPoints[1];
+    //auto a = LerpVector3(p0, p1, t);
+    //auto b = LerpVector3(p1, p2, t);
+    //auto c = LerpVector3(p2, p3, t);
+    //return LerpVector3(LerpVector3(a, b, t), LerpVector3(b, c, t), t);
+    return EvaluateNotePositionBetWeen(
+        note,
+        now,
+        note.GetSpawnTime(),
+        GetArrivalTime(note)
+    );
+
+}
+
+static float GetVisualSpawnTime(const Note& note, float highSpeed)
+{
+    float arrivalTime = (note.note == LONGNOTE) ? note.arrivalTime : note.time;
+
+    float chartTravelTime = arrivalTime - note.GetSpawnTime();
+    if (chartTravelTime < 0.01f)
+        chartTravelTime = 0.01f;
+
+    //ハイスピ6.0を標準速度とする
+    float visualTravelTime = chartTravelTime * (6.0f / highSpeed);
+
+    return arrivalTime - visualTravelTime;
+}
+
+//3Dプレイのハイスピで変化する出現時刻を使用
+static DirectX::SimpleMath::Vector3 EvaluateNotePositionForPlay(
+    const Note& note,
+    float now,
+    float highSpeed
+)
+{
+    float arrivalTime = GetArrivalTime(note);
+    float visualSpawnTime = GetVisualSpawnTime(note, highSpeed);
+
+    return EvaluateNotePositionBetWeen(
+        note,
+        now,
+        visualSpawnTime,
+        arrivalTime
+    );
 }
 
 static DirectX::SimpleMath::Vector3 EvaluateLongNotePos(const Note& note, float now)
@@ -146,6 +240,8 @@ static DirectX::SimpleMath::Vector3 EvaluateLongNotePos(const Note& note, float 
 	float t = (now - startTime) / duration; //not クランプ
 	return LerpVector3(note.spawnPos, note.judgePos, t);
 }
+
+
 
 
 // ─────────────────────────────────────────────
@@ -349,7 +445,7 @@ void Game::Initialize(HWND window, int width, int height)
 
         //デフォルトキーフレーム
         float defaultX = -( - 240.0f + (540.0f / 6.0f) * i + (600.0f / 12.0f));
-        judggeCircles[i].keyframe.push_back({ 0.0f,defaultX,-55.0f, -210.0f });
+        judggeCircles[i].keyframe.push_back({ 0.0f,defaultX,kNoteY, -210.0f });
     }
 
     //3Dモデルのロード
@@ -507,7 +603,9 @@ void Game::Update(DX::StepTimer const& timer)
             if (note.lane < 0 || note.lane >= (int)judggeCircles.size()) continue;
             const auto& circle = judggeCircles[note.lane];
             auto circlePos = circle.GetPosition(now);
-            note.judgePos = circlePos;
+            float endTime = note.time;
+
+            note.judgePos = judggeCircles[note.lane].GetPosition(endTime);
         }
     }
 
@@ -552,7 +650,7 @@ void Game::Update(DX::StepTimer const& timer)
         ImGui::TextColored(ImVec4(1, 1, 0, 1), ">>> START placed! Click END position <<<");
 
     // ─ マウスクリックによるノーツ配置 / 選択 ──
-    if (!isOutRange) // マウスが編集エリア内にある場合のみ処理
+    if (!isOutRange && m_GameMode != GameMode::Edit2D) // マウスが編集エリア内にある場合のみ処理
     {
         // ── レイキャスト：スクリーン座標 → ワールド座標 変換 ──────────
         //
@@ -595,7 +693,7 @@ void Game::Update(DX::StepTimer const& timer)
         float denom = rayDir.Dot(camForward);
         if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
         {
-            m_PlacementHeight += ImGui::GetIO().MouseWheel * 10.0f; // 感度は調整
+            m_PlacementHeight -= ImGui::GetIO().MouseWheel * 10.0f; // 感度は調整
         }
         // y=-55 の水平面とレイの交点を計算
         constexpr float noteY = -55.0f;
@@ -768,8 +866,6 @@ void Game::Update(DX::StepTimer const& timer)
             break;
 
         case BGMstate::play:
-            // 一時停止：ノーツを退避前の状態に戻す
-            notes = originalNotes;
             sound.PauseDynamic();
             bgmstate = BGMstate::pause;
             break;
@@ -950,8 +1046,8 @@ void Game::Update(DX::StepTimer const& timer)
     // ─ 再生中は音楽時間を進める / 停止中はエディタ位置を更新 ────────
     if (bgmstate == BGMstate::play)
     {
-        if (highSpeed < 0.0f) highSpeed = 0.0f;
-        musicTime += elapsedTime * highSpeed; // ハイスピード倍率をかけて進む
+        if (highSpeed < 0.1f) highSpeed = 0.1f;
+        musicTime += elapsedTime;
 
         if (m_AudioDurationSeconds > 0.0f && musicTime >= m_AudioDurationSeconds)
         {
@@ -1028,8 +1124,9 @@ void Game::Render()
     float screenW = ImGui::GetIO().DisplaySize.x;
     float screenH = ImGui::GetIO().DisplaySize.y;
     float leftW = 250.0f;   // 左パネルの幅
+    float rightW = 240.0f;
     float bottomH = 60.0f;    // 下バーの高さ
-    float chartW = screenW - leftW;   // 3Dビューの幅
+    float chartW = screenW - leftW - rightW;   // 3Dビューの幅
     float chartH = screenH - bottomH; // 3Dビューの高さ
 
     // ── View / Projection 行列の設定 ─────────────
@@ -1070,6 +1167,13 @@ void Game::Render()
     //        Vector3::UnitZ
     //    );
     //}
+
+    switch (m_GameMode)
+    {
+    case GameMode::Edit2D: DrawNoteEditorView(leftW, 0.0f, chartW, chartH); break;
+    case GameMode::Play3D: break;
+
+    }
   
 
     m_proj = Matrix::CreatePerspectiveFieldOfView(
@@ -1115,6 +1219,7 @@ void Game::Render()
     // ════════════════════════════════════════════
     // 左パネル UI
     // ════════════════════════════════════════════
+    if(m_GameMode == GameMode::Edit2D)
     {
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(ImVec2(leftW, screenH - bottomH));
@@ -1123,7 +1228,8 @@ void Game::Render()
             ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
 
         // ハイスピード倍率スライダー（ノーツの移動速度）
-        ImGui::SliderFloat("HighSpeed", &highSpeed, 0.1f, 5.0f);
+        ImGui::SliderFloat("HighSpeed", &highSpeed, 0.1f, 15.0f);
+        ImGui::SliderFloat("Note Scale", &noteScale, 0.1f, 15.0f);
         if (m_EditorState == EditorState::PLACING_SPAWN || m_EditorState == EditorState::PLACING_JUDGE)
         {
             ImGui::TextColored(ImVec4(0.6f, 1.0f, 1.0f, 1.0f),
@@ -1138,13 +1244,27 @@ void Game::Render()
         NoteType noteTypes[] = { TAP, LONGNOTE, FLICK_RIGHT, FLICK_LEFT };
 
         // カメラビュー切替ボタン
-        if (ImGui::Button("Play View", ImVec2(-1, 0))) {
-            ViewMode = true;
-            cameraPos = { 0.0f, 0.0f, -500.0f };
+        if (m_GameMode == GameMode::Edit2D)
+        {
+            if (ImGui::Button("Play View", ImVec2(-1, 0))) 
+            {
+                m_GameMode = GameMode::Play3D;
+                ViewMode = true;
+                cameraPos = { 0.0f, 0.0f, -500.0f };
+                // 配置途中だった場合は中断
+                m_EditorState = EditorState::IDLE;
+                selectedNoteIndex = -1;
+            }
         }
-        if (ImGui::Button("Default View", ImVec2(-1, 0))) {
-            ViewMode = false;
+        else if(m_GameMode == GameMode::Play3D)
+        {
+            if (ImGui::Button("Default View", ImVec2(-1, 0))) 
+            {
+                m_GameMode = GameMode::Edit2D;
+                ViewMode = false;
+            }
         }
+
 
         // 各ノーツ種別ボタン（選択中は青くハイライト）
         for (int i = 0; i < (int)std::size(noteTypes); i++)
@@ -1378,7 +1498,11 @@ void Game::Render()
                 if (sel) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(1.0f, 0.5f, 0.0f, 1.0f));
                 char label[8];
                 sprintf_s(label, "%s##k%d", keyNames[i], i);
-                if (ImGui::Button(label, ImVec2(24, 0))) n.lane = i;
+                if (ImGui::Button(label, ImVec2(24, 0)))
+                {
+                    n.lane = i;
+                    n.judgePos = judggeCircles[i].GetPosition(n.arrivalTime);
+                }
                 if (sel) ImGui::PopStyleColor();
             }
 
@@ -1583,6 +1707,13 @@ void Game::Render()
                 const auto& note = notes[i];
                 bool isSelected = (i == selectedNoteIndex);
 
+                if (m_GameMode == GameMode::Play3D &&
+                    (musicTime < note.GetSpawnTime() || musicTime > note.time))
+                {
+                    continue;
+                }
+
+
                 // 選択中は黄色、それ以外は水色
                 ImU32 pathCol = isSelected
                     ? IM_COL32(255, 230, 80, 230)
@@ -1622,6 +1753,56 @@ void Game::Render()
         }
         ImGui::End();
     }
+    else if (m_GameMode == GameMode::Play3D)
+    {
+        ImGui::SetNextWindowPos(ImVec2(screenW - 1900.0f, 80.0f));
+        ImGui::SetNextWindowSize(ImVec2(138.0f, 42.0f));
+
+        ImGui::Begin("PlayOverlay", nullptr,
+            ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoCollapse |
+            ImGuiWindowFlags_NoTitleBar |
+            ImGuiWindowFlags_NoBackground);
+
+        if (ImGui::Button("2D Editor", ImVec2(138.0f, 32.0f)))
+        {
+            m_GameMode = GameMode::Edit2D;
+            ViewMode = false;
+        }
+
+        ImGui::End();
+    }
+
+    ImGui::SetNextWindowPos(ImVec2(leftW + chartW, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2(rightW, screenH - bottomH));
+
+    ImGui::Begin("Note Hierarchy", nullptr,
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoCollapse);
+
+    ImGui::Text("Notes: %d", (int)notes.size());
+    ImGui::Separator();
+
+    const char* typeNames[] = { "TAP", "LONG", "FLICK R", "FLICK L" };
+
+    for (int i = 0; i < (int)notes.size(); ++i)
+    {
+        const Note& n = notes[i];
+
+        char label[96];
+        sprintf_s(label, "%03d  [%s]  %.2f -> %.2f",
+            i, typeNames[(int)n.note], n.GetSpawnTime(), n.arrivalTime);
+
+        if (ImGui::Selectable(label, selectedNoteIndex == i))
+        {
+            selectedNoteIndex = i;
+            m_EditorState = EditorState::EDITING;
+        }
+    }
+
+    ImGui::End();
 
     // ════════════════════════════════════════════
     // DirectX PrimitiveBatch による 3D 描画
@@ -1675,6 +1856,13 @@ void Game::Render()
     {
         auto& note = notes[i];
         bool  isSel = (i == selectedNoteIndex);
+
+        float visualSpawnTime = GetVisualSpawnTime(note, highSpeed);
+        if (m_GameMode == GameMode::Play3D &&
+            (musicTime < visualSpawnTime || musicTime > note.time))
+        {
+            continue;
+        }
 
         XMVECTORF32 pathCol = isSel ? Colors::Yellow : Colors::Cyan;
         XMVECTORF32 spawnCol = isSel ? Colors::Yellow : Colors::LimeGreen;
@@ -2018,10 +2206,10 @@ void Game::Render()
             const auto& note = notes[i];
             if (note.note == FLICK_RIGHT || note.note == FLICK_LEFT || note.note == LONGNOTE) continue;
             float et = note.time;
-            float st = note.GetSpawnTime();
+            float st = GetVisualSpawnTime(note, highSpeed); //これを使うことで3Dモデルのハイスピを反映
 
             if (now < st || now > et) continue;
-            DirectX::SimpleMath::Vector3 pos = EvaluateNotePosition(note, now);
+            DirectX::SimpleMath::Vector3 pos = EvaluateNotePositionForPlay(note, now, highSpeed);
             DirectX::SimpleMath::Vector3 tint;
 
             //DirectX::SimpleMath::Vector3 pos;
@@ -2070,9 +2258,10 @@ void Game::Render()
             const auto& note = notes[i];
             if (note.note != FLICK_RIGHT && note.note != FLICK_LEFT) continue;
             float et = note.time;
-            float st = note.GetSpawnTime();
+            float st = GetVisualSpawnTime(note, highSpeed); //これを使うことで3Dモデルのハイスピを反映
+
             if (now < st || now > et) continue;
-            DirectX::SimpleMath::Vector3 pos = EvaluateNotePosition(note, now);
+            DirectX::SimpleMath::Vector3 pos = EvaluateNotePositionForPlay(note, now, highSpeed);
             //if (bgmstate != BGMstate::play)
             //{
             //    pos = note.spawnPos;
@@ -2599,8 +2788,10 @@ void Game::LoadChart(std::string name)
             }
             else
             {
-                float laneX = -310.0f + (660.0f / 6.0f) * note.lane + (660.0f / 12.0f);
-                note.spawnPos = { laneX, -55.0f, 1000.0f };
+                float spawnX =
+                    -(-240.0f + (540.0f / 6.0f) * note.lane + (600.0f / 12.0f));
+
+                note.spawnPos = { spawnX, kNoteY, 1000.0f };
             }
 
             if (n.contains("judgePos"))
@@ -2611,8 +2802,10 @@ void Game::LoadChart(std::string name)
             }
             else
             {
-                float laneX = -310.0f + (660.0f / 6.0f) * note.lane + (660.0f / 12.0f);
-                note.judgePos = { laneX, -55.0f, -210.0f };
+                float spawnX =
+                    -(-240.0f + (540.0f / 6.0f) * note.lane + (600.0f / 12.0f));
+
+                note.spawnPos = { spawnX, kNoteY, 1000.0f };
             }
 
             // arrivalTime（旧フォーマット互換：無ければ time と同じにしておく）
@@ -2726,6 +2919,436 @@ void Game::LoadChart(std::string name)
     OutputDebugStringA(("[LoadChart]" + g_chartStatusMessage + "\n").c_str());
 }
 
+void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float regionH)
+{
+    ImGui::SetNextWindowPos(ImVec2(regionX, regionY));
+    ImGui::SetNextWindowSize(ImVec2(regionW, regionH));
+    ImGui::Begin("NoteEditor", nullptr,
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoScrollWithMouse);
+
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    ImVec2 origin = ImGui::GetCursorScreenPos();
+    const int laneCount = 6;
+    float laneW = regionW / laneCount;
+    float judgeY = origin.y + regionH - 40.0f;
+    const char* laneNames[] = { "S","D","F","J","K","L" };
+
+    float secondsPerBeat = (bpm > 0) ? 60.0f / bpm : 0.5f;
+    float nowTime = (bgmstate == BGMstate::play) ? musicTime : m_EditorScrollTime;
+
+    if (bgmstate != BGMstate::play && ImGui::IsWindowHovered())
+    {
+        float wheel = ImGui::GetIO().MouseWheel;
+        if (wheel != 0.0f) m_EditorScrollTime -= wheel * secondsPerBeat * 0.5f;
+        float dt = ImGui::GetIO().DeltaTime;
+        if (GetAsyncKeyState(VK_UP) & 0x8000)   m_EditorScrollTime += 5.0f * dt;
+        if (GetAsyncKeyState(VK_DOWN) & 0x8000) m_EditorScrollTime -= 5.0f * dt;
+        if (m_EditorScrollTime < 0.0f) m_EditorScrollTime = 0.0f;
+        nowTime = m_EditorScrollTime;
+    }
+
+    auto TimeToY = [&](float t) { return judgeY - (t - nowTime) * m_EditorPxPerSec * highSpeed; };
+    auto YToTime = [&](float y) { return nowTime + (judgeY - y) / (m_EditorPxPerSec * highSpeed); };
+    auto LaneColX = [&](int lane) { return origin.x + lane * laneW + laneW * 0.5f; };
+    auto XToLane = [&](float sx) {
+        int lane = (int)((sx - origin.x) / laneW);
+        return std::clamp(lane, 0, laneCount - 1);
+        };
+    auto LaneWorldX = [&](int lane) {
+        // 2Dの左→右レーン番号を、3Dの出現側X座標へ対応させる
+        return -(-240.0f + (540.0f / 6.0f) * lane + (600.0f / 12.0f));
+        };
+
+    // ── 背景 ──
+    draw->AddRectFilled(origin, ImVec2(origin.x + regionW, origin.y + regionH), IM_COL32(20, 22, 28, 255));
+
+    // ── レーン区切り線 ──
+    for (int i = 0; i <= laneCount; i++)
+    {
+        float x = origin.x + laneW * i;
+        draw->AddLine(ImVec2(x, origin.y), ImVec2(x, judgeY), IM_COL32(55, 55, 65, 130));
+    }
+
+    // ── 拍グリッド ──
+    {
+        float topTime = YToTime(origin.y);
+        float bottomTime = YToTime(judgeY);
+        int beatStart = (int)std::floor(std::min(topTime, bottomTime) / secondsPerBeat) - 1;
+        int beatEnd = (int)std::ceil(std::max(topTime, bottomTime) / secondsPerBeat) + 1;
+
+        ImGui::SetWindowFontScale(0.7f);
+        for (int b = beatStart; b <= beatEnd; b++)
+        {
+            for (int sub = 0; sub < m_EditorSnapDivision; sub++)
+            {
+                float t = (b + (float)sub / m_EditorSnapDivision) * secondsPerBeat;
+                if (t < 0.0f) continue;
+                float y = TimeToY(t);
+                if (y < origin.y - 20.0f || y > judgeY + 20.0f) continue;
+                bool isMainBeat = (sub == 0);
+                ImU32 col = isMainBeat ? IM_COL32(110, 110, 130, 180) : IM_COL32(50, 50, 60, 110);
+                draw->AddLine(ImVec2(origin.x, y), ImVec2(origin.x + regionW, y), col, isMainBeat ? 1.3f : 0.8f);
+                if (isMainBeat)
+                {
+                    char label[16];
+                    sprintf_s(label, "%.2fs", t);
+                    draw->AddText(ImVec2(origin.x + 2.0f, y - 11.0f), IM_COL32(150, 150, 170, 200), label);
+                }
+            }
+        }
+        ImGui::SetWindowFontScale(1.0f);
+    }
+
+    // ── NOWライン ──
+    draw->AddLine(ImVec2(origin.x, judgeY), ImVec2(origin.x + regionW, judgeY), IM_COL32(255, 70, 70, 255), 3.0f);
+
+    // ── レーンキー(下) ──
+    for (int i = 0; i < laneCount; i++)
+    {
+        ImVec2 c(LaneColX(i), judgeY + 20.0f);
+        draw->AddCircleFilled(c, 14.0f, IM_COL32(40, 44, 54, 255));
+        draw->AddCircle(c, 14.0f, IM_COL32(150, 160, 190, 220), 16, 1.5f);
+        draw->AddText(ImVec2(c.x - 5.0f, c.y - 7.0f), IM_COL32(230, 230, 240, 255), laneNames[i]);
+    }
+
+    // ── 配置中：仮の出現点マーカー(1回目クリック後) ──
+    if (m_EditorState == EditorState::PLACING_JUDGE)
+    {
+        int spawnLane = 0;
+        float bestDist = FLT_MAX;
+
+        for (int lane = 0; lane < laneCount; ++lane)
+        {
+            float dist = fabsf(LaneWorldX(lane) - m_TempNote.spawnPos.x);
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                spawnLane = lane;
+            }
+        }
+
+        float sx = LaneColX(spawnLane);
+        float sy = TimeToY(m_TempNote.spawnTime);
+        draw->AddCircleFilled(ImVec2(sx, sy), 7.0f, IM_COL32(255, 230, 120, 255));
+        draw->AddCircle(ImVec2(sx, sy), 11.0f, IM_COL32(255, 230, 120, 150), 16, 2.0f);
+
+        // マウス位置までの仮線(プレビュー)
+        ImVec2 mp = ImGui::GetMousePos();
+        draw->AddLine(ImVec2(sx, sy), mp, IM_COL32(255, 230, 120, 120), 1.5f);
+    }
+
+    ImGui::SetCursorScreenPos(origin);
+    ImGui::InvisibleButton("editor_canvas_bg", ImVec2(regionW, regionH));
+    bool canvasHovered = ImGui::IsItemHovered();
+    ImVec2 mousePos = ImGui::GetMousePos();
+    bool anyNoteHandleActivatedThisFrame = false;
+
+    // ── 既存ノーツ：出現点→到達点の線 ──
+    for (int i = 0; i < (int)notes.size(); i++)
+    {
+        auto& n = notes[i];
+        if (n.lane < 0 || n.lane >= laneCount) continue;
+
+        float spawnT = n.GetSpawnTime();
+        float arriveT = (n.note == LONGNOTE) ? n.arrivalTime : n.time;
+        float endT = n.time;
+
+        // 出現/到達それぞれの「レーン」を、保存されたワールドXから逆算して求める
+        int spawnLane = n.lane; // 出現側の見た目レーンは spawnPos.x から近いものを推定
+        {
+            float bestDist = 1e9f;
+            for (int L = 0; L < laneCount; L++)
+            {
+                float d = fabsf(LaneWorldX(L) - n.spawnPos.x);
+                if (d < bestDist) { bestDist = d; spawnLane = L; }
+            }
+        }
+        int arriveLane = n.lane; // 到達レーン = 判定に使うレーン(n.laneそのもの)
+
+        ImVec2 pSpawn(LaneColX(spawnLane), TimeToY(spawnT));
+        ImVec2 pArrive(LaneColX(arriveLane), TimeToY(arriveT));
+
+        if (pSpawn.y < origin.y - 60.0f && pArrive.y < origin.y - 60.0f) continue;
+        if (pSpawn.y > judgeY + 60.0f && pArrive.y > judgeY + 60.0f) continue;
+
+        bool selected = (i == selectedNoteIndex);
+        ImU32 lineCol = selected ? IM_COL32(255, 230, 120, 255) : IM_COL32(120, 200, 255, 200);
+        ImU32 arriveCol = selected ? IM_COL32(255, 200, 60, 255) :
+            (n.note == FLICK_RIGHT || n.note == FLICK_LEFT) ? IM_COL32(255, 140, 220, 230) :
+            IM_COL32(90, 255, 150, 230);
+
+        // 出現→到達の線（レーンが違えば斜めになる）
+        draw->AddLine(pSpawn, pArrive, lineCol, selected ? 2.5f : 1.5f);
+
+        if (n.note == LONGNOTE)
+        {
+            ImVec2 pEnd(pArrive.x, TimeToY(endT));
+            draw->AddRectFilled(ImVec2(pArrive.x - 8.0f, pEnd.y), ImVec2(pArrive.x + 8.0f, pArrive.y),
+                IM_COL32(120, 200, 255, 110));
+            draw->AddCircleFilled(pEnd, 6.0f, IM_COL32(120, 200, 255, 230));
+
+            ImGui::PushID(i * 3 + 2);
+            ImGui::SetCursorScreenPos(ImVec2(pEnd.x - 10.0f, pEnd.y - 10.0f));
+            ImGui::InvisibleButton("end_handle", ImVec2(20.0f, 20.0f));
+            if (ImGui::IsItemActivated())
+            {
+                selectedNoteIndex = i; m_DraggingNoteIndex = i; m_DragHandle = DragHandle::End;
+                anyNoteHandleActivatedThisFrame = true;
+            }
+            ImGui::PopID();
+        }
+
+        // 出現点(丸)
+        draw->AddCircleFilled(pSpawn, 6.0f, IM_COL32(120, 230, 180, 230));
+        ImGui::PushID(i * 3 + 0);
+        ImGui::SetCursorScreenPos(ImVec2(pSpawn.x - 10.0f, pSpawn.y - 10.0f));
+        ImGui::InvisibleButton("spawn_handle", ImVec2(20.0f, 20.0f));
+        if (ImGui::IsItemActivated())
+        {
+            selectedNoteIndex = i; m_DraggingNoteIndex = i; m_DragHandle = DragHandle::Spawn;
+            anyNoteHandleActivatedThisFrame = true;
+        }
+        ImGui::PopID();
+
+        // 到達点(四角)
+        draw->AddRectFilled(ImVec2(pArrive.x - 7.0f, pArrive.y - 7.0f), ImVec2(pArrive.x + 7.0f, pArrive.y + 7.0f), arriveCol, 2.0f);
+        char arriveLabel[16];
+        sprintf_s(arriveLabel, "%.2fs", arriveT);
+        ImVec2 textSize = ImGui::CalcTextSize(arriveLabel);
+        draw->AddText(ImVec2(pArrive.x - textSize.x * 0.5f, pArrive.y - 24.0f), IM_COL32(255, 255, 255, 230), arriveLabel);
+
+        ImGui::PushID(i * 3 + 1);
+        ImGui::SetCursorScreenPos(ImVec2(pArrive.x - 10.0f, pArrive.y - 10.0f));
+        ImGui::InvisibleButton("arrive_handle", ImVec2(20.0f, 20.0f));
+        if (ImGui::IsItemActivated())
+        {
+            selectedNoteIndex = i; m_DraggingNoteIndex = i; m_DragHandle = DragHandle::Arrival;
+            anyNoteHandleActivatedThisFrame = true;
+        }
+        ImGui::PopID();
+
+        // ── 再生中：線に沿って動く現在位置マーカー ──
+        if (bgmstate == BGMstate::play && musicTime >= spawnT && musicTime <= endT)
+        {
+            float t = (arriveT - spawnT > 0.0001f) ? (musicTime - spawnT) / (arriveT - spawnT) : 1.0f;
+            t = std::clamp(t, 0.0f, 1.0f);
+            float mx = pSpawn.x + (pArrive.x - pSpawn.x) * t;
+            float my = pSpawn.y + (pArrive.y - pSpawn.y) * t;
+            draw->AddCircleFilled(ImVec2(mx, my), 8.0f, IM_COL32(255, 255, 255, 240));
+            draw->AddCircle(ImVec2(mx, my), 12.0f, IM_COL32(255, 255, 120, 200), 16, 2.0f);
+        }
+    }
+
+    //線をクリックすることでノーツ全体を選択、簡単な移動
+    if (canvasHovered && !anyNoteHandleActivatedThisFrame && m_DraggingNoteIndex == -1 &&
+        (m_EditorState == EditorState::IDLE || m_EditorState == EditorState::EDITING) &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    {
+        int hitIndex = -1;
+        float bestDistanceSq = 12.0f * 12.0f;   //線から12px以内なら選択
+        for (int i = 0; i < (int)notes.size(); ++i)
+        {
+            const Note& n = notes[i];
+
+            //出現側レーンをspawnPos.xから求める
+            int spawnLane = 0;
+            float bestLaneDist = FLT_MAX;
+            for (int lane = 0; lane < laneCount; ++lane)
+            {
+                float d = fabsf(LaneWorldX(lane) - n.spawnPos.x);
+                if (d < bestLaneDist)
+                {
+                    bestLaneDist = d;
+                    spawnLane = lane;
+                }
+            }
+
+            float arriveTime = (n.note == LONGNOTE) ? n.arrivalTime : n.time;
+            ImVec2 a(LaneColX(spawnLane), TimeToY(n.GetSpawnTime()));
+            ImVec2 b(LaneColX(n.lane), TimeToY(arriveTime));
+
+            //マウス座標から線分a-b最短距離
+            float abx = b.x - a.x;
+            float aby = b.y - a.y;
+            float apx = mousePos.x - a.x;
+            float apy = mousePos.y - a.y;
+
+            float lengthSq = abx + aby * aby;
+            float t = (lengthSq > 0.00001f)
+                ? (apx * abx + apy * aby) / lengthSq
+                : 0.0f;
+
+            t = std::clamp(t, 0.0f, 1.0f);
+
+            float nearestX = a.x + abx * t;
+            float nearestY = a.y + aby * t;
+            float dx = mousePos.x - nearestX;
+            float dy = mousePos.y - nearestY;
+            float distanceSq = dx * dx + dy * dy;
+
+            if (distanceSq < bestDistanceSq)
+            {
+                bestDistanceSq = distanceSq;
+                hitIndex = i;
+            }
+        }
+        if (hitIndex >= 0)
+        {
+            selectedNoteIndex = hitIndex;
+            m_DraggingNoteIndex = hitIndex;
+            m_DragHandle = DragHandle::Whole;
+
+            //ドラッグ開始時の状態を保存
+            m_DragOriginalNote = notes[hitIndex];
+            m_DragStartMouseTime = YToTime(mousePos.y);
+            m_DragStartMouseLane = XToLane(mousePos.x);
+            m_EditorState = EditorState::EDITING;
+        }
+    }
+
+    // ── ドラッグ処理 ──
+    if (m_DraggingNoteIndex >= 0 && m_DraggingNoteIndex < (int)notes.size() &&
+        ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+    {
+        auto& n = notes[m_DraggingNoteIndex];
+        float newTime = YToTime(mousePos.y);
+        int newLane = XToLane(mousePos.x);
+        if (m_DragHandle == DragHandle::Whole)
+        {
+            //開始時のノーツから舞フレーム計算
+            Note moved = m_DragOriginalNote;
+
+            float deltaTime = newTime - m_DragStartMouseTime;
+            deltaTime = std::max(deltaTime, -m_DragOriginalNote.spawnTime);
+
+            moved.spawnTime = m_DragOriginalNote.spawnTime + deltaTime;
+            moved.arrivalTime = m_DragOriginalNote.arrivalTime + deltaTime;
+            moved.time = m_DragOriginalNote.time + deltaTime;
+
+            // つかんだ場所から何レーン横に移動したか
+            int laneOffset = newLane - m_DragStartMouseLane;
+            int targetLane = std::clamp(
+                m_DragOriginalNote.lane + laneOffset, 0, laneCount - 1);
+
+            float xOffset =
+                LaneWorldX(targetLane) - LaneWorldX(m_DragOriginalNote.lane);
+
+            moved.lane = targetLane;
+            moved.spawnPos.x = m_DragOriginalNote.spawnPos.x + xOffset;
+            moved.judgePos =
+                judggeCircles[targetLane].GetPosition(moved.arrivalTime);
+
+            // ベジェ制御点があるノーツも一緒に横移動
+            for (auto& point : moved.controlPoints)
+                point.x += xOffset;
+
+            notes[m_DraggingNoteIndex] = moved;
+        }
+        else if (m_DragHandle == DragHandle::Spawn)
+        {
+            n.spawnTime = newTime;
+            n.spawnPos.x = LaneWorldX(newLane);
+            if (n.arrivalTime <= n.spawnTime) n.arrivalTime = n.spawnTime + g_minTravelTime;
+        }
+        else if (m_DragHandle == DragHandle::Arrival)
+        {
+            n.lane = newLane;
+            n.judgePos = judggeCircles[newLane].GetPosition(n.arrivalTime);
+
+            if (n.note == LONGNOTE)
+            {
+                float holdDur = n.time - n.arrivalTime;
+                n.arrivalTime = std::max(newTime, n.spawnTime + g_minTravelTime);
+                n.time = n.arrivalTime + std::max(holdDur, 0.05f);
+            }
+            else
+            {
+                n.time = std::max(newTime, n.spawnTime + g_minTravelTime);
+                n.arrivalTime = n.time;
+            }
+        }
+        else if (m_DragHandle == DragHandle::End)
+        {
+            n.time = std::max(newTime, n.arrivalTime + 0.05f);
+        }
+    }
+
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+    {
+        m_DraggingNoteIndex = -1;
+        m_DragHandle = DragHandle::None;
+    }
+
+    // ── 2クリック配置：1回目=出現、2回目=到達 ──
+    if (canvasHovered && !anyNoteHandleActivatedThisFrame && m_DraggingNoteIndex == -1 &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    {
+        int clickLane = XToLane(mousePos.x);
+        float clickTime = YToTime(mousePos.y);
+        if (clickTime < 0.0f) clickTime = 0.0f;
+
+        if (m_EditorState == EditorState::PLACING_SPAWN)
+        {
+            m_TempNote.spawnTime = clickTime;
+            m_TempNote.spawnPos = { LaneWorldX(clickLane), kNoteY, 1000.0f };
+
+            if (m_TempNote.note == FLICK_RIGHT || m_TempNote.note == FLICK_LEFT)
+                m_TempNote.spawnPos = { enemyPos.x, kNoteY, enemyPos.z };
+
+            m_EditorState = EditorState::PLACING_JUDGE;
+        }
+        else if (m_EditorState == EditorState::PLACING_JUDGE)
+        {
+            float arriveT = std::max(clickTime, m_TempNote.spawnTime + g_minTravelTime);
+
+            const int targetLane = m_TempNote.lane; //最初に設定したところ
+            m_TempNote.judgePos = judggeCircles[targetLane].GetPosition(arriveT);
+
+            if (m_TempNote.note == FLICK_RIGHT || m_TempNote.note == FLICK_LEFT)
+            {
+                m_TempNote.judgePos = { 0.0f,kNoteY,-210.0f };
+            }
+            if (m_TempNote.note == LONGNOTE)
+            {
+                m_TempNote.arrivalTime = arriveT;
+                m_TempNote.time =
+                    arriveT + std::max(m_TempNote.holdDuration, 0.05f);
+            }
+            else
+            {
+                m_TempNote.time = arriveT;
+                m_TempNote.arrivalTime = arriveT;
+            }
+            notes.push_back(m_TempNote);
+            std::sort(notes.begin(), notes.end(),
+                [](const Note& a, const Note& b) { return a.time < b.time; });
+                m_EditorState = EditorState::IDLE;
+        }
+        else if (m_EditorState == EditorState::IDLE)
+        {
+            // ノーツ選択(近いものを探す)
+            selectedNoteIndex = -1;
+        }
+    }
+
+    // ── 右クリックで削除／配置中断 ──
+    if (canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+    {
+        if (m_EditorState == EditorState::PLACING_SPAWN || m_EditorState == EditorState::PLACING_JUDGE)
+        {
+            m_EditorState = EditorState::IDLE;
+        }
+        else if (selectedNoteIndex >= 0)
+        {
+            notes.erase(notes.begin() + selectedNoteIndex);
+            selectedNoteIndex = -1;
+        }
+    }
+
+    ImGui::End();
+}
 
 void Game::JudggeLane(char key, int laneIndex)
 {
