@@ -1,6 +1,7 @@
 {
-"meta":{"bpm":120,"totalBeat":1000,"audioFile":"1minute.mp3"},
+"meta":{"bpm":120,"totalBeat":1000,"audioFile":"hisou.wav"},
 "notes":[
+{"lane":3,"type":0,"time":3.5,"spawnTime":1,"arrivalTime":1.1,"flickLaneTo":-1,"holdDuration":0,"spawnPos":{"x":-10.6899,"y":150,"z":395.663},"judgePos":{"x":-80,"y":-55,"z":-210}}
 ],
 "beams":[
 ],

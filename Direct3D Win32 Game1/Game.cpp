@@ -2236,7 +2236,7 @@ void Game::Render()
 
         // ── タイムラインスライダー ───────────────
         float secondsPerBeat = 60.0f / bpm;
-        float timelineSeconds = (bgmstate == BGMstate::play)
+        float timelineSeconds = (bgmstate == BGMstate::play || bgmstate == BGMstate::pause)
             ? musicTime
             : editorBeat * secondsPerBeat;
         float songLengthSeconds = (m_AudioDurationSeconds > 0.0f)
