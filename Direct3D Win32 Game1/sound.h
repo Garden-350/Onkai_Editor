@@ -2,6 +2,7 @@
 
 #include <xaudio2.h>
 #include <string>
+#include <vector>
 
 // サウンドファイル
 typedef enum
@@ -94,5 +95,6 @@ public:
 	void SetPlayPositionSecondsDynamic(float seconds);
 	void SeekSecondsDynamic(float seconds);
 	void SetVolumeDynamic(float volume);
+	void ComputeEnvelope(int bucketsPerSecond, std::vector<float>& outLevels) const;
 	float GetDynamicDurationSeconds() const;
 };

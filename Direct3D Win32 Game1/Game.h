@@ -21,6 +21,7 @@
 #include <memory>
 #include <Model.h>
 #include <DeviceResources.h>
+#include <DeviceResources.h>
 
 enum class BGMstate
 {
@@ -228,6 +229,7 @@ private:
     std::string name;
     std::chrono::steady_clock::time_point musicStartTime;
 	std::vector<HomingBeam> homingBeams;
+    std::vector<float> m_audioEnvelope;
 
     std::unique_ptr<DirectX::PrimitiveBatch<DirectX::VertexPositionColor>> m_primitiveBatch;
     std::unique_ptr<DirectX::PrimitiveBatch<DirectX::VertexPositionColor>> m_yLine;
@@ -287,6 +289,7 @@ private:
     float m_AudioDurationSeconds = 0.0f;    //読み込んだ曲の長さによって調整される（自動）
     float m_EditorScrollTime = 0.0f;
     float m_EditorPxPerSec = 150.0f;
+    float m_audioEnvelopeBucketsPerSec = 60.0f; //1秒あたりのサンプル解像度
 
     //ビーム配置UI用の一時入力値
     float m_newBeamChargeTime = 0.0f;
@@ -294,10 +297,6 @@ private:
 	float m_newBeamHitTime = 1.5f;
     //ビームが出るところ（今は敵の位置から）
 	DirectX::SimpleMath::Vector3 enemyPos = { 0.0f, 50.0f, 500.0f };
-    //クワッド描画用ヘルパー関数　宣言
-    void DrawThickBeam(const DirectX::SimpleMath::Vector3& from,
-        const DirectX::SimpleMath::Vector3& to,
-        float thickness, DirectX::XMVECTORF32 color);
 
     void DrawThickBeam(const DirectX::SimpleMath::Vector3& from,
         const DirectX::SimpleMath::Vector3& to,
@@ -405,6 +404,19 @@ private:
     float playerMoveRange = 70.0f; // 左右移動の振れ幅
     float playerVisualX = 0.0f; //見た目用の現在のX座標（補間）
     float playerMoveSpeed = 800.0f; //1秒あたりにどれぐらい動けるか
+
+
+    //FPS計測
+    static constexpr int kFpsHistoryCount = 240;    //4秒の計測(60fps換算)
+    float m_frameTimeHistory[kFpsHistoryCount] = {};
+    int m_frameTimeHistoryHead = 0;
+    float m_frameTimeMinRecent = 0.0f;
+    float m_frameTimeMaxRecent = 0.0f;
+    float m_frameTimeSpikeThresholdMs = 33.3f;  //この値を超えたらスパイク(30fpsぐらい)
+    int m_spikeCount = 0;   //なんかいスパイクしたかをカウント
+    float m_lastUpdateMs = 0.0f;
+    float m_lastRenderMs = 0.0f;
+    bool m_fpsGraphEnabled = false;
 
 
     //ノーツ選択一覧
