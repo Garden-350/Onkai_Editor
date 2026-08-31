@@ -1,6 +1,7 @@
 #pragma once
 
 #include <xaudio2.h>
+#include <vector>
 #include <string>
 
 // サウンドファイル
@@ -94,5 +95,6 @@ public:
 	void SetPlayPositionSecondsDynamic(float seconds);
 	void SeekSecondsDynamic(float seconds);
 	void SetVolumeDynamic(float volume);
+	void ComputeEnvelope(int bucketsPerSecond, std::vector<float>& outLevels) const;
 	float GetDynamicDurationSeconds() const;
 };

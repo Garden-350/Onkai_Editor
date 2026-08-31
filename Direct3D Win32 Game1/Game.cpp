@@ -537,17 +537,30 @@ void Game::Initialize(HWND window, int width, int height)
 // ─────────────────────────────────────────────
 void Game::Tick()
 {
-    // ImGui 新フレーム開始
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
+    auto tUpdateStart = std::chrono::high_resolution_clock::now();
     m_timer.Tick([&]()
         {
             Update(m_timer);
         });
+    auto tUpdateEnd = std::chrono::high_resolution_clock::now();
 
     Render();
+    auto tRenderEnd = std::chrono::high_resolution_clock::now();
+
+    m_lastUpdateMs = std::chrono::duration<float, std::milli>(tUpdateEnd - tUpdateStart).count();
+    m_lastRenderMs = std::chrono::duration<float, std::milli>(tRenderEnd - tUpdateEnd).count();
+
+    // フレーム全体の時間を履歴に記録
+    float totalMs = m_lastUpdateMs + m_lastRenderMs;
+    m_frameTimeHistory[m_frameTimeHistoryHead] = totalMs;
+    m_frameTimeHistoryHead = (m_frameTimeHistoryHead + 1) % kFpsHistoryCount;
+
+    if (totalMs >= m_frameTimeSpikeThresholdMs)
+        m_spikeCount++;
 }
 
 DirectX::SimpleMath::Vector3 Game::EvaluteChainPartPosition(const Note& note, float now, float leadOffset)
@@ -1215,6 +1228,117 @@ void Game::Render()
         ImGui::Text("MISS: %.1i", miss);
 
         ImGui::End();
+    }
+    // ════════════════════════════════════════════
+    // Performance Monitor（GameModeに関係なく常時表示）
+    //   下部バー(シークバー)のすぐ右上、画面右下に配置。
+    //   ノーツ編集キャンバス(leftW~leftW+chartW)とは重ならない位置。
+    // ════════════════════════════════════════════
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        ImDrawList* fg = ImGui::GetForegroundDrawList();
+
+        float boxW = 260.0f;
+        float graphH = 50.0f;   // 下部バーの上に収めるため少し低めに
+
+        // ── 統計値の計算 ──
+        float sum = 0.0f, minV = FLT_MAX, maxV = 0.0f;
+        std::vector<float> sorted;
+        sorted.reserve(kFpsHistoryCount);
+        for (int i = 0; i < kFpsHistoryCount; i++)
+        {
+            float v = m_frameTimeHistory[i];
+            if (v <= 0.0f) continue;
+            sum += v;
+            minV = std::min(minV, v);
+            maxV = std::max(maxV, v);
+            sorted.push_back(v);
+        }
+        int validCount = (int)sorted.size();
+        float avgMs = validCount > 0 ? sum / validCount : 0.0f;
+
+        float onePercentLowMs = 0.0f;
+        if (validCount > 0)
+        {
+            std::sort(sorted.begin(), sorted.end(), std::greater<float>());
+            int onePercentCount = std::max(1, validCount / 100);
+            float s = 0.0f;
+            for (int i = 0; i < onePercentCount; i++) s += sorted[i];
+            onePercentLowMs = s / onePercentCount;
+        }
+        float curFps = io.Framerate;
+        ImU32 fpsCol = curFps >= 55.0f ? IM_COL32(100, 255, 100, 255)
+            : curFps >= 30.0f ? IM_COL32(255, 255, 80, 255)
+            : IM_COL32(255, 80, 80, 255);
+
+        float lineH = 16.0f;
+        float textAreaH = lineH * 4.0f + 4.0f;
+        float boxH = textAreaH + graphH + 16.0f;
+
+        // ── 位置：画面右下、下部バー(シークバー)のすぐ上 ──
+        ImVec2 boxMin(screenW - boxW - 10.0f, screenH - bottomH - boxH - 8.0f);
+        ImVec2 boxMax(boxMin.x + boxW, boxMin.y + boxH);
+
+        fg->AddRectFilled(boxMin, boxMax, IM_COL32(10, 10, 14, 220), 4.0f);
+        fg->AddRect(boxMin, boxMax, IM_COL32(100, 100, 120, 255), 4.0f);
+
+        char buf[160];
+        float ty = boxMin.y + 6.0f;
+
+        sprintf_s(buf, "FPS: %.1f", curFps);
+        fg->AddText(ImVec2(boxMin.x + 8.0f, ty), fpsCol, buf); ty += lineH;
+
+        sprintf_s(buf, "Frame: %.2fms (U%.2f/R%.2f)",
+            m_lastUpdateMs + m_lastRenderMs, m_lastUpdateMs, m_lastRenderMs);
+        fg->AddText(ImVec2(boxMin.x + 8.0f, ty), IM_COL32(220, 220, 220, 255), buf); ty += lineH;
+
+        sprintf_s(buf, "Avg:%.2f Min:%.2f Max:%.2f",
+            avgMs, minV == FLT_MAX ? 0.0f : minV, maxV);
+        fg->AddText(ImVec2(boxMin.x + 8.0f, ty), IM_COL32(200, 200, 210, 255), buf); ty += lineH;
+
+        sprintf_s(buf, "1%%Low:%.2fms Spikes:%d",
+            onePercentLowMs, m_spikeCount);
+        fg->AddText(ImVec2(boxMin.x + 8.0f, ty), IM_COL32(200, 200, 210, 255), buf); ty += lineH + 4.0f;
+
+        ImVec2 graphMin(boxMin.x + 8.0f, ty);
+        ImVec2 graphMax(boxMax.x - 8.0f, ty + graphH);
+        fg->AddRectFilled(graphMin, graphMax, IM_COL32(0, 0, 0, 150));
+
+        float graphYMax = std::max(33.3f, maxV) * 1.1f;
+        float graphW = graphMax.x - graphMin.x;
+        float graphHgt = graphMax.y - graphMin.y;
+
+        auto MsToY = [&](float ms) {
+            float t = std::clamp(ms / graphYMax, 0.0f, 1.0f);
+            return graphMax.y - t * graphHgt;
+            };
+
+        fg->AddLine(ImVec2(graphMin.x, MsToY(16.6f)), ImVec2(graphMax.x, MsToY(16.6f)), IM_COL32(80, 200, 80, 120));
+        fg->AddLine(ImVec2(graphMin.x, MsToY(33.3f)), ImVec2(graphMax.x, MsToY(33.3f)), IM_COL32(200, 80, 80, 120));
+
+        ImVec2 prevPt;
+        bool hasPrev = false;
+        for (int i = 0; i < kFpsHistoryCount; i++)
+        {
+            int idx = (m_frameTimeHistoryHead + i) % kFpsHistoryCount;
+            float v = m_frameTimeHistory[idx];
+            if (v <= 0.0f) { hasPrev = false; continue; }
+
+            float x = graphMin.x + graphW * ((float)i / (float)(kFpsHistoryCount - 1));
+            float y = MsToY(v);
+            ImVec2 pt(x, y);
+
+            if (hasPrev)
+            {
+                ImU32 lineCol = v >= 33.3f ? IM_COL32(255, 90, 90, 255)
+                    : v >= 20.0f ? IM_COL32(255, 220, 80, 255)
+                    : IM_COL32(90, 220, 255, 255);
+                fg->AddLine(prevPt, pt, lineCol, 1.5f);
+            }
+            prevPt = pt;
+            hasPrev = true;
+        }
+        fg->AddRect(graphMin, graphMax, IM_COL32(100, 100, 120, 200));
     }
     // ════════════════════════════════════════════
     // 左パネル UI
@@ -2756,7 +2880,19 @@ void Game::LoadChart(std::string name)
             }
             else
             {
-                m_AudioDurationSeconds = sound.GetDynamicDurationSeconds(); //曲の長さを取得
+                m_AudioDurationSeconds = sound.GetDynamicDurationSeconds();
+
+                sound.ComputeEnvelope((int)m_audioEnvelopeBucketsPerSec, m_audioEnvelope);
+
+                // 最大値で正規化
+                float maxV = 0.0f;
+                for (float v : m_audioEnvelope) maxV = std::max(maxV, v);
+                if (maxV > 0.0001f)
+                    for (float& v : m_audioEnvelope) v /= maxV;
+
+                constexpr float kEnvelopeGamma = 0.5f;
+                for (float& v : m_audioEnvelope)
+                    v = powf(std::clamp(v, 0.0f, 1.0f), kEnvelopeGamma);
             }
         }
         else
@@ -2930,8 +3066,12 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
 
     ImDrawList* draw = ImGui::GetWindowDrawList();
     ImVec2 origin = ImGui::GetCursorScreenPos();
+    constexpr float kSpectrumW = 80.0f;
+    float laneRegionW = regionW - kSpectrumW;
     const int laneCount = 6;
-    float laneW = regionW / laneCount;
+    float laneW = laneRegionW / laneCount;
+    float spectrumX0 = origin.x + laneRegionW;
+    float spectrumX1 = origin.x + regionW;
     float judgeY = origin.y + regionH - 40.0f;
     const char* laneNames[] = { "S","D","F","J","K","L" };
 
@@ -2999,6 +3139,76 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
             }
         }
         ImGui::SetWindowFontScale(1.0f);
+    }
+    // ── オーディオスペクトラム描画 ──
+    if (!m_audioEnvelope.empty())
+    {
+        draw->AddRectFilled(
+            ImVec2(spectrumX0, origin.y),
+            ImVec2(spectrumX1, judgeY),
+            IM_COL32(10, 10, 14, 255));
+
+        float topTime = YToTime(origin.y);
+        float bottomTime = YToTime(judgeY);
+        float minT = std::min(topTime, bottomTime);
+        float maxT = std::max(topTime, bottomTime);
+
+        int bucketStart = std::max(0, (int)(minT * m_audioEnvelopeBucketsPerSec) - 1);
+        int bucketEnd = std::min((int)m_audioEnvelope.size() - 1,
+            (int)(maxT * m_audioEnvelopeBucketsPerSec) + 1);
+
+        auto LevelToColor = [](float level) -> ImU32
+            {
+                level = std::clamp(level, 0.0f, 1.0f);
+
+                // 4色を定義: 青 → 緑 → 黄 → 赤
+                struct ColorStop { float pos; int r, g, b; };
+                static const ColorStop stops[] = {
+                    { 0.0f,  40,  60, 255 }, // 青
+                    { 0.35f, 40, 220, 120 }, // 緑
+                    { 0.65f, 255, 220,  40 }, // 黄
+                    { 1.0f,  255,  50,  50 }, // 赤
+                };
+
+                for (int i = 0; i < 3; i++)
+                {
+                    if (level >= stops[i].pos && level <= stops[i + 1].pos)
+                    {
+                        float t = (level - stops[i].pos) / (stops[i + 1].pos - stops[i].pos);
+                        int r = (int)(stops[i].r + (stops[i + 1].r - stops[i].r) * t);
+                        int g = (int)(stops[i].g + (stops[i + 1].g - stops[i].g) * t);
+                        int b = (int)(stops[i].b + (stops[i + 1].b - stops[i].b) * t);
+                        return IM_COL32(r, g, b, 255);
+                    }
+                }
+                return IM_COL32(255, 50, 50, 255);
+            };
+
+        float bucketDuration = 1.0f / m_audioEnvelopeBucketsPerSec;
+        float barMaxWidth = kSpectrumW - 8.0f;
+
+        for (int i = bucketStart; i <= bucketEnd; i++)
+        {
+            float t0 = i * bucketDuration;
+            float t1 = t0 + bucketDuration;
+            float y0 = TimeToY(t0);
+            float y1 = TimeToY(t1);
+            if (y1 > origin.y - 2.0f && y0 < judgeY + 2.0f)
+            {
+                float level = m_audioEnvelope[i];
+                float w = 2.0f + barMaxWidth * level;
+                ImU32 col = LevelToColor(level);
+
+                draw->AddRectFilled(
+                    ImVec2(spectrumX0 + 4.0f, std::min(y0, y1)),
+                    ImVec2(spectrumX0 + 4.0f + w, std::max(y0, y1) + 1.0f),
+                    col);
+            }
+        }
+
+        // 現在時刻ラインの位置にも軽く強調線
+        draw->AddLine(ImVec2(spectrumX0, judgeY), ImVec2(spectrumX1, judgeY),
+            IM_COL32(255, 70, 70, 200), 2.0f);
     }
 
     // ── NOWライン ──

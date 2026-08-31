@@ -228,6 +228,7 @@ private:
     std::string name;
     std::chrono::steady_clock::time_point musicStartTime;
 	std::vector<HomingBeam> homingBeams;
+    std::vector<float> m_audioEnvelope;
 
     std::unique_ptr<DirectX::PrimitiveBatch<DirectX::VertexPositionColor>> m_primitiveBatch;
     std::unique_ptr<DirectX::PrimitiveBatch<DirectX::VertexPositionColor>> m_yLine;
@@ -287,6 +288,7 @@ private:
     float m_AudioDurationSeconds = 0.0f;    //読み込んだ曲の長さによって調整される（自動）
     float m_EditorScrollTime = 0.0f;
     float m_EditorPxPerSec = 150.0f;
+    float m_audioEnvelopeBucketsPerSec = 120.0f; //1秒あたりのサンプリング回数
 
     //ビーム配置UI用の一時入力値
     float m_newBeamChargeTime = 0.0f;
@@ -405,6 +407,18 @@ private:
     float playerMoveRange = 70.0f; // 左右移動の振れ幅
     float playerVisualX = 0.0f; //見た目用の現在のX座標（補間）
     float playerMoveSpeed = 800.0f; //1秒あたりにどれぐらい動けるか
+
+    // ── FPS計測用 ──
+    static constexpr int kFpsHistoryCount = 240; // 4秒分(60fps換算)
+    float m_frameTimeHistory[kFpsHistoryCount] = {};
+    int   m_frameTimeHistoryHead = 0;
+    float m_frameTimeMinRecent = 0.0f;
+    float m_frameTimeMaxRecent = 0.0f;
+    float m_frameTimeSpikeThresholdMs = 33.3f; // これを超えたらスパイク扱い(30fps相当)
+    int   m_spikeCount = 0;
+    bool  m_fpsGraphEnabled = true;
+    float m_lastUpdateMs = 0.0f;
+    float m_lastRenderMs = 0.0f;
 
 
     //ノーツ選択一覧
