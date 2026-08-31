@@ -69,9 +69,9 @@ constexpr float kPreviewScaleY = 0.3512f;
 constexpr float kPreviewScaleYZ = 0.0543f;
 
 //判定タイミング(調整必須)
-constexpr float kPerfect = 0.2f;
-constexpr float kGreat = 0.4f;
-constexpr float kGud = 0.6f;
+constexpr float kPerfect = 0.02f;
+constexpr float kGreat = 0.04f;
+constexpr float kGud = 0.06f;
 
 //ロングノーツのティックインターバル
 constexpr float kLongTickInterval = 0.2f;
@@ -158,6 +158,37 @@ static DirectX::SimpleMath::Vector3 EvaluateNotePositionBetWeen(
 static DirectX::SimpleMath::Vector3 EvaluateNotePosition(
     const Note& note, float now)
 {
+    //float startTime = note.GetSpawnTime();
+    //float endTime = note.time;
+    //float duration = endTime - startTime;
+    //if (duration < 0.0001f) duration = 0.0001f; // ゼロ除算防止
+
+    //// 正規化された補間係数 t を [0,1] にクランプ
+    //float t = (now - startTime) / duration;
+    //if (t < 0.0f) t = 0.0f;
+    //if (t > 1.0f) t = 1.0f;
+
+    //const auto& p0 = note.spawnPos;
+    //const auto& p3 = note.judgePos;
+
+    //// 制御点なし → 直線補間
+    //if (note.controlPoints.empty())
+    //    return LerpVector3(p0, p3, t);
+
+    //// 制御点1個 → 2次ベジェ
+    //if (note.controlPoints.size() == 1)
+    //{
+    //    const auto& p1 = note.controlPoints[0];
+    //    return LerpVector3(LerpVector3(p0, p1, t), LerpVector3(p1, p3, t), t);
+    //}
+
+    //// 制御点2個 → 3次ベジェ（De Casteljau アルゴリズム）
+    //const auto& p1 = note.controlPoints[0];
+    //const auto& p2 = note.controlPoints[1];
+    //auto a = LerpVector3(p0, p1, t);
+    //auto b = LerpVector3(p1, p2, t);
+    //auto c = LerpVector3(p2, p3, t);
+    //return LerpVector3(LerpVector3(a, b, t), LerpVector3(b, c, t), t);
     return EvaluateNotePositionBetWeen(
         note,
         now,
@@ -344,6 +375,24 @@ static void DrawJuddgeBurst(ImDrawList* draw, ImVec2 center, float age, int rank
         AddRotatedSaure(draw, orbitCenter, smallHalf, selfSpin, orbitCol, 0.0f, true);
     }
 
+
+    //float coreRadius = 10.0f * (1.0f - growT * 0.5f) + 2.0f;
+    //draw->AddCircleFilled(center, coreRadius, coreCol);
+
+    //for (int i = 0; i < rayCount; i++)
+    //{
+    //    float baseAngle = (float)i / rayCount * 6.2831853f;
+    //    float jitter = sinf((float)i * 12.9898f) * 0.25f;   //疑似ランダムな揺らぎ
+    //    float angle = baseAngle + jitter;
+
+    //    float len = maxLen * growT * (0.6f + 0.4f * fabsf(sinf(i * 3.71f)));
+    //    ImVec2 dir(cosf(angle), sinf(angle));
+    //    ImVec2 p0(center.x + dir.x * coreRadius, center.y + dir.y * coreRadius);
+    //    ImVec2 p1(center.x + dir.x * len, center.y + dir.y * len);
+
+    //    draw->AddLine(p0, p1, rayCol, 2.5f * fade + 0.5f);
+    //    draw->AddCircleFilled(p1, 2.0f * fade, tipCol);
+    //}
 }
 
 float Game::CalcFacingAngleY(const DirectX::SimpleMath::Vector3& from, const DirectX::SimpleMath::Vector3& to)
@@ -450,6 +499,21 @@ void Game::Initialize(HWND window, int width, int height)
     }
 
 
+    // ※ 3Dモデルのロード情報（現在は未使用）
+    //struct Load3DInfo {
+    //    std::string filename;
+    //    std::string texdirectoryname;
+    //    Load3DInfo(std::string p1, std::string p2) {
+    //        filename = p1;
+    //        texdirectoryname = p2;
+    //    }
+    //};
+
+    //std::array<Load3DInfo, 1> g_loadmodel =
+    //{
+    //    Load3DInfo("asset/Model/Dai/Daiza.obj", "asset/Model"),
+    //};
+
 
 
     // ImGui 初期化
@@ -478,25 +542,12 @@ void Game::Tick()
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    auto tUpdateStart = std::chrono::high_resolution_clock::now();
     m_timer.Tick([&]()
         {
             Update(m_timer);
         });
-    auto tUpdateEnd = std::chrono::high_resolution_clock::now();
 
     Render();
-    auto tRenderEnd = std::chrono::high_resolution_clock::now();
-
-    m_lastUpdateMs = std::chrono::duration<float, std::milli>(tUpdateEnd - tUpdateStart).count();
-    m_lastRenderMs = std::chrono::duration<float, std::milli>(tRenderEnd - tUpdateEnd).count();
-
-    //フレーム全体の時間を記録
-    float totalMs = m_lastUpdateMs + m_lastRenderMs;
-    m_frameTimeHistory[m_frameTimeHistoryHead] = totalMs;
-    m_frameTimeHistoryHead = (m_frameTimeHistoryHead + 1) % kFpsHistoryCount;
-    if (totalMs >= m_frameTimeSpikeThresholdMs)
-        m_spikeCount++;
 }
 
 DirectX::SimpleMath::Vector3 Game::EvaluteChainPartPosition(const Note& note, float now, float leadOffset)
@@ -649,6 +700,8 @@ void Game::Update(DX::StepTimer const& timer)
         bool hasHit = false;
         if (fabsf(denom) > 1e-5f) // y成分がほぼ0でなければ（水平レイは交差しない）
         {
+            //float t = (planePoint - nearPoint).Dot(camForward) / denom;
+            //float t = (noteY - nearPoint.y) / rayDir.y; // 交点パラメータ
             float t = (m_PlacementHeight - nearPoint.y) / rayDir.y;
             if (t > 0.0f) // カメラ後方には交差しない
             {
@@ -909,6 +962,62 @@ void Game::Update(DX::StepTimer const& timer)
             }
         }
     }
+    //ビームの状態遷移ロジック
+ //   if(bgmstate == BGMstate::play)
+ //   {
+ //       for (auto& beam : homingBeams)
+ //       {
+ //           if(!beam.chargeSoundPlayerd && musicTime >= beam.chargeTime)
+ //           {
+ //               sound.Play(SOUND_BEAM_SARCH);   //探してる時の効果音
+ //               beam.chargeSoundPlayerd = true;
+	//		}
+
+ //           if (beam.state == BeamState::Homing)
+ //           {
+ //               //早期ロック地点をまだ迎えてなかったら通常通り追従
+ //               if (!beam.judgmentLocked)
+ //               {
+ //                   float earlyLockTime = beam.chargeTime + (beam.lockTime - beam.chargeTime) * HomingBeam::kEarlyLockRatio;
+
+ //                   beam.lockedSide = playerSide;
+ //                   beam.lockedPos = playerBasePos;
+ //                   beam.lockedPos.x += playerSide * playerMoveRange;
+
+ //                   if (musicTime >= earlyLockTime)
+ //                   {
+ //                       beam.judgmentLocked = true; // これ以降、lockedSide/lockedPosは固定される
+
+ //                       if (!beam.lockSoundPlayed)
+ //                       {
+ //                           sound.Play(SOUND_BEAM_DECITION);    //打つ場所が確定した時の効果音
+ //                           beam.lockSoundPlayed = true;
+ //                       }
+ //                   }
+ //               }
+
+ //               if (musicTime >= beam.lockTime)
+ //               {
+ //                   if (!beam.fireSoundPlayed)
+ //                   {
+ //                       sound.Play(SOUND_BEAM_FIRING);
+ //                       beam.fireSoundPlayed = true;
+ //                   }
+ //                   beam.state = BeamState::Fired;
+ //               }
+ //           }
+ //           else if (beam.state == BeamState::Fired)
+ //           {
+ //               if (musicTime >= beam.hitTime)
+ //               {
+	//				bool dodged = (playerSide != beam.lockedSide);
+ //                   if (dodged) success++;  //判定変えたかったら変えてね
+	//				else miss++;
+ //                   beam.state = BeamState::Resolved;
+ //               }
+ //           }
+ //       }
+	//}
 
     //ミス判定
     if (bgmstate == BGMstate::play)
@@ -975,6 +1084,14 @@ void Game::Update(DX::StepTimer const& timer)
         JudggeFlickNotes();
 		JudggeLongNoteHold();   //ロングノーツの判定
     }
+    //else
+    //{
+    //    // 停止中：マウスホイール または ↑↓ キーで拍位置を移動
+    //    float wheel = ImGui::GetIO().MouseWheel;
+    //    editorBeat += wheel;
+    //    if (GetAsyncKeyState(VK_UP) & 0x8000) editorBeat += 0.1f;
+    //    if (GetAsyncKeyState(VK_DOWN) & 0x8000) editorBeat -= 0.1f;
+    //}
     KeySpacePrev = keySpace;
 }
 #pragma endregion
@@ -1034,7 +1151,22 @@ void Game::Render()
             Vector3(0.0f, -55.0f, -200.0f),
             Vector3::UnitY
         );
+        //    // デフォルトビュー：真上から真下（Z+ 方向）を見下ろす
+        //m_view = Matrix::CreateLookAt(
+        //    Vector3(cameraPos.x, cameraPos.y, cameraPos.z),
+        //    Vector3(cameraPos.x, -55.0f, cameraPos.z + 1.0f),
+        //    Vector3::UnitZ
+        //);
     }
+    //else
+    //{
+    //    // デフォルトビュー：真上から真下（Z+ 方向）を見下ろす
+    //    m_view = Matrix::CreateLookAt(
+    //        Vector3(cameraPos.x, cameraPos.y, cameraPos.z),
+    //        Vector3(cameraPos.x, -55.0f, cameraPos.z + 1.0f),
+    //        Vector3::UnitZ
+    //    );
+    //}
 
     switch (m_GameMode)
     {
@@ -1084,121 +1216,6 @@ void Game::Render()
 
         ImGui::End();
     }
-
-
-    //FPS表示
-// ════════════════════════════════════════════
-// Performance Monitor（GameModeに関係なく常時表示）
-//   下部バー(シークバー)のすぐ右上、画面右下に配置。
-//   ノーツ編集キャンバス(leftW~leftW+chartW)とは重ならない位置。
-// ════════════════════════════════════════════
-    {
-        ImGuiIO& io = ImGui::GetIO();
-        ImDrawList* fg = ImGui::GetForegroundDrawList();
-
-        float boxW = 260.0f;
-        float graphH = 50.0f;
-
-        // ── 統計値の計算 ──
-        float sum = 0.0f, minV = FLT_MAX, maxV = 0.0f;
-        std::vector<float> sorted;
-        sorted.reserve(kFpsHistoryCount);
-        for (int i = 0; i < kFpsHistoryCount; i++)
-        {
-            float v = m_frameTimeHistory[i];
-            if (v <= 0.0f) continue;
-            sum += v;
-            minV = std::min(minV, v);
-            maxV = std::max(maxV, v);
-            sorted.push_back(v);
-        }
-        int validCount = (int)sorted.size();
-        float avgMs = validCount > 0 ? sum / validCount : 0.0f;
-
-        float onePercentLowMs = 0.0f;
-        if (validCount > 0)
-        {
-            std::sort(sorted.begin(), sorted.end(), std::greater<float>());
-            int onePercentCount = std::max(1, validCount / 100);
-            float s = 0.0f;
-            for (int i = 0; i < onePercentCount; i++) s += sorted[i];
-            onePercentLowMs = s / onePercentCount;
-        }
-        float curFps = io.Framerate;
-        ImU32 fpsCol = curFps >= 55.0f ? IM_COL32(100, 255, 100, 255)
-            : curFps >= 30.0f ? IM_COL32(255, 255, 80, 255)
-            : IM_COL32(255, 80, 80, 255);
-
-        float lineH = 16.0f;
-        float textAreaH = lineH * 4.0f + 4.0f;
-        float boxH = textAreaH + graphH + 16.0f;
-
-        //ここ触ったら場所をちょっとだけ変えれます
-        ImVec2 boxMin(screenW - boxW - 10.0f, screenH - bottomH - boxH + 50.0f);
-        ImVec2 boxMax(boxMin.x + boxW, boxMin.y + boxH);
-
-        fg->AddRectFilled(boxMin, boxMax, IM_COL32(10, 10, 14, 220), 4.0f);
-        fg->AddRect(boxMin, boxMax, IM_COL32(100, 100, 120, 255), 4.0f);
-
-        char buf[160];
-        float ty = boxMin.y + 6.0f;
-
-        sprintf_s(buf, "FPS: %.1f", curFps);
-        fg->AddText(ImVec2(boxMin.x + 8.0f, ty), fpsCol, buf); ty += lineH;
-
-        sprintf_s(buf, "Frame: %.2fms (U%.2f/R%.2f)",
-            m_lastUpdateMs + m_lastRenderMs, m_lastUpdateMs, m_lastRenderMs);
-        fg->AddText(ImVec2(boxMin.x + 8.0f, ty), IM_COL32(220, 220, 220, 255), buf); ty += lineH;
-
-        sprintf_s(buf, "Avg:%.2f Min:%.2f Max:%.2f",
-            avgMs, minV == FLT_MAX ? 0.0f : minV, maxV);
-        fg->AddText(ImVec2(boxMin.x + 8.0f, ty), IM_COL32(200, 200, 210, 255), buf); ty += lineH;
-
-        sprintf_s(buf, "1%%Low:%.2fms Spikes:%d",
-            onePercentLowMs, m_spikeCount);
-        fg->AddText(ImVec2(boxMin.x + 8.0f, ty), IM_COL32(200, 200, 210, 255), buf); ty += lineH + 4.0f;
-
-        ImVec2 graphMin(boxMin.x + 8.0f, ty);
-        ImVec2 graphMax(boxMax.x - 8.0f, ty + graphH);
-        fg->AddRectFilled(graphMin, graphMax, IM_COL32(0, 0, 0, 150));
-
-        float graphYMax = std::max(33.3f, maxV) * 1.1f;
-        float graphW = graphMax.x - graphMin.x;
-        float graphHgt = graphMax.y - graphMin.y;
-
-        auto MsToY = [&](float ms) {
-            float t = std::clamp(ms / graphYMax, 0.0f, 1.0f);
-            return graphMax.y - t * graphHgt;
-            };
-
-        fg->AddLine(ImVec2(graphMin.x, MsToY(16.6f)), ImVec2(graphMax.x, MsToY(16.6f)), IM_COL32(80, 200, 80, 120));
-        fg->AddLine(ImVec2(graphMin.x, MsToY(33.3f)), ImVec2(graphMax.x, MsToY(33.3f)), IM_COL32(200, 80, 80, 120));
-
-        ImVec2 prevPt;
-        bool hasPrev = false;
-        for (int i = 0; i < kFpsHistoryCount; i++)
-        {
-            int idx = (m_frameTimeHistoryHead + i) % kFpsHistoryCount;
-            float v = m_frameTimeHistory[idx];
-            if (v <= 0.0f) { hasPrev = false; continue; }
-
-            float x = graphMin.x + graphW * ((float)i / (float)(kFpsHistoryCount - 1));
-            float y = MsToY(v);
-            ImVec2 pt(x, y);
-
-            if (hasPrev)
-            {
-                ImU32 lineCol = v >= 33.3f ? IM_COL32(255, 90, 90, 255)
-                    : v >= 20.0f ? IM_COL32(255, 220, 80, 255)
-                    : IM_COL32(90, 220, 255, 255);
-                fg->AddLine(prevPt, pt, lineCol, 1.5f);
-            }
-            prevPt = pt;
-            hasPrev = true;
-        }
-        fg->AddRect(graphMin, graphMax, IM_COL32(100, 100, 120, 200));
-    }
-
     // ════════════════════════════════════════════
     // 左パネル UI
     // ════════════════════════════════════════════
@@ -1489,6 +1506,14 @@ void Game::Render()
                 if (sel) ImGui::PopStyleColor();
             }
 
+            // 時刻編集（SpawnTime = 出現時刻、ArriveTime = 判定時刻）
+   //         ImGui::InputFloat("StartTime", &n.spawnTime, 0.01f);
+   //         ImGui::InputFloat("ArriveTime", &n.time, 0.01f);
+   //         if (n.time <= n.GetSpawnTime())
+   //             n.time = n.GetSpawnTime() + 0.01f; // 整合性チェック
+   //         ImGui::Text("TravelTime: %.2f sec", n.time - n.GetSpawnTime());
+			//ImGui::Text("From %.2f to %.2f sec", n.GetSpawnTime(), n.time);
+
             //時刻編集（3段階）
             //1.表示開始時刻 = SpawnTime(クリック位置から表示開始時間)
             //2.到達時刻 = arrivalTime(判定ラインに到達する時刻)
@@ -1610,6 +1635,122 @@ void Game::Render()
             }
             ImGui::PopStyleColor();
         }
+
+        // ════════════════════════════════════════
+        // 3D Path Preview（左パネル下部のミニビュー）
+        //
+        //   全ノーツのベジェパスを等角投影で描画する。
+        //   現在の再生位置にいるノーツは移動中の丸マーカーを表示。
+        // ════════════════════════════════════════
+        {
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            ImVec2 pos = ImGui::GetCursorScreenPos();
+            m_EditorScreenPos = pos;
+            m_ChartW = chartW;
+            m_ChartH = chartH;
+            chartPosX = pos.x;
+
+            //bpm = 120;
+            float secondPerBeat = 60.0f / bpm;
+            currentBeat = (bgmstate == BGMstate::play)
+                ? musicTime / secondPerBeat
+                : editorBeat;
+
+            // プレビュー矩形の範囲
+            float previewW = leftW - 20.0f;
+            float previewH = 200.0f;
+            ImVec2 previewMin(pos.x, pos.y);
+            ImVec2 previewMax(previewMin.x + previewW, previewMin.y + previewH);
+            ImVec2 previewCenter(
+                (previewMin.x + previewMax.x) * 0.5f,
+                previewMin.y + previewH * 0.62f); // 縦の中心をやや上に設定
+
+            m_PreviewMin = previewMin;
+            m_PreviewMax = previewMax;
+            m_PreviewCenter = previewCenter;
+            m_PreviewValid = true;
+
+            // 背景・枠・タイトル
+            draw->AddRectFilled(previewMin, previewMax, IM_COL32(18, 20, 26, 220));
+            draw->AddRect(previewMin, previewMax, IM_COL32(130, 150, 180, 180));
+            draw->AddText(ImVec2(previewMin.x + 8.0f, previewMin.y + 6.0f),
+                IM_COL32(220, 230, 255, 230), "3D Path Preview");
+
+            ImGui::Dummy(ImVec2(previewW, previewH + 8.0f)); // ImGui レイアウト用の空領域
+
+            // ─ 等角投影関数（ワールド座標 → プレビュー画面座標）
+            auto Project3D = [&](const DirectX::SimpleMath::Vector3& v) -> ImVec2
+                {
+                    float sx = previewCenter.x + v.x * kPreviewScaleX + v.z * kPreviewScaleXZ;
+                    float sy = previewCenter.y - v.y * kPreviewScaleY - v.z * kPreviewScaleYZ;
+                    return ImVec2(sx, sy);
+                };
+
+            // ─ 座標軸の描画（X: 赤, Z: 青, Y: 緑）
+            {
+                ImVec2 origin = Project3D({ 0.0f, -55.0f, -210.0f });
+                draw->AddLine(origin, Project3D({ 360.0f, -55.0f, -210.0f }), IM_COL32(255, 90, 90, 180), 1.5f);
+                draw->AddLine(origin, Project3D({ 0.0f, -55.0f, 900.0f }), IM_COL32(120, 170, 255, 180), 1.5f);
+                draw->AddLine(origin, Project3D({ 0.0f, 120.0f, -210.0f }), IM_COL32(120, 255, 150, 180), 1.5f);
+                draw->AddText(Project3D({ 380.0f, -55.0f, -210.0f }), IM_COL32(255, 130, 130, 220), "X");
+                draw->AddText(Project3D({ 0.0f, -55.0f, 940.0f }), IM_COL32(150, 190, 255, 220), "Z");
+                draw->AddText(Project3D({ 0.0f, 135.0f, -210.0f }), IM_COL32(150, 255, 180, 220), "Y");
+            }
+
+            // ─ 各ノーツのパス・マーカー・移動中丸の描画 ──────────
+            float previewTime = (bgmstate == BGMstate::play)
+                ? musicTime
+                : editorBeat * secondPerBeat;
+
+            for (int i = 0; i < (int)notes.size(); i++)
+            {
+                const auto& note = notes[i];
+                bool isSelected = (i == selectedNoteIndex);
+
+                if (m_GameMode == GameMode::Play3D &&
+                    (musicTime < note.GetSpawnTime() || musicTime > note.time))
+                {
+                    continue;
+                }
+
+
+                // 選択中は黄色、それ以外は水色
+                ImU32 pathCol = isSelected
+                    ? IM_COL32(255, 230, 80, 230)
+                    : IM_COL32(90, 190, 255, 150);
+
+                // パスを 24 分割して折れ線で描画
+                float startT = note.GetSpawnTime();
+                float endT = note.time;
+                float rangeT = endT - startT;
+                ImVec2 prev = Project3D(note.spawnPos);
+                for (int s = 1; s <= 24; s++)
+                {
+                    float sampleT = startT + rangeT * (float)s / 24.0f;
+                    ImVec2 cur = Project3D(EvaluateNotePosition(note, sampleT));
+                    draw->AddLine(prev, cur, pathCol, isSelected ? 2.0f : 1.0f);
+                    prev = cur;
+                }
+
+                // spawnPos = 青い円、judgePos = 赤い四角
+                ImVec2 spawnP = Project3D(note.spawnPos);
+                ImVec2 judgeP = Project3D(note.judgePos);
+                draw->AddCircleFilled(spawnP, 3.5f, IM_COL32(0, 210, 255, 210));
+                draw->AddRectFilled(
+                    ImVec2(judgeP.x - 4.0f, judgeP.y - 4.0f),
+                    ImVec2(judgeP.x + 4.0f, judgeP.y + 4.0f),
+                    IM_COL32(255, 110, 110, 230));
+
+                // 現在時刻にいるノーツには移動中マーカー（大きめの丸）を表示
+                if (previewTime >= startT && previewTime <= endT)
+                {
+                    ImVec2 bullet = Project3D(EvaluateNotePosition(note, previewTime));
+                    draw->AddCircleFilled(bullet,
+                        isSelected ? 7.0f : 5.0f,
+                        isSelected ? IM_COL32(255, 255, 80, 255) : IM_COL32(120, 255, 170, 230));
+                }
+            }
+        }
         ImGui::End();
     }
     else if (m_GameMode == GameMode::Play3D)
@@ -1633,39 +1774,35 @@ void Game::Render()
         ImGui::End();
     }
 
-    if (m_GameMode == GameMode::Edit2D)
+    ImGui::SetNextWindowPos(ImVec2(leftW + chartW, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2(rightW, screenH - bottomH));
+
+    ImGui::Begin("Note Hierarchy", nullptr,
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoCollapse);
+
+    ImGui::Text("Notes: %d", (int)notes.size());
+    ImGui::Separator();
+
+    const char* typeNames[] = { "TAP", "LONG", "FLICK R", "FLICK L" };
+
+    for (int i = 0; i < (int)notes.size(); ++i)
     {
-        ImGui::SetNextWindowPos(ImVec2(leftW + chartW, 0.0f));
-        ImGui::SetNextWindowSize(ImVec2(rightW, screenH - bottomH));
+        const Note& n = notes[i];
 
-        ImGui::Begin("Note Hierarchy", nullptr,
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoCollapse);
+        char label[96];
+        sprintf_s(label, "%03d  [%s]  %.2f -> %.2f",
+            i, typeNames[(int)n.note], n.GetSpawnTime(), n.arrivalTime);
 
-        ImGui::Text("Notes: %d", (int)notes.size());
-        ImGui::Separator();
-
-        const char* typeNames[] = { "TAP", "LONG", "FLICK R", "FLICK L" };
-
-        for (int i = 0; i < (int)notes.size(); ++i)
+        if (ImGui::Selectable(label, selectedNoteIndex == i))
         {
-            const Note& n = notes[i];
-
-            char label[96];
-            sprintf_s(label, "%03d  [%s]  %.2f -> %.2f",
-                i, typeNames[(int)n.note], n.GetSpawnTime(), n.arrivalTime);
-
-            if (ImGui::Selectable(label, selectedNoteIndex == i))
-            {
-                selectedNoteIndex = i;
-                m_EditorState = EditorState::EDITING;
-            }
+            selectedNoteIndex = i;
+            m_EditorState = EditorState::EDITING;
         }
-
-        ImGui::End();
     }
 
+    ImGui::End();
 
     // ════════════════════════════════════════════
     // DirectX PrimitiveBatch による 3D 描画
@@ -1878,6 +2015,30 @@ void Game::Render()
         float hw = 40.0f; // ノーツ半幅（X方向）
         float hd = 10.0f; // ノーツ半奥行（Z方向）
 
+        //XMVECTORF32 col;
+        //switch (note.lane)
+        //{
+        //case 0: col = { 1.0f, 0.3f, 0.3f, 1.0f }; break; // 赤（S）
+        //case 1: col = { 1.0f, 0.7f, 0.0f, 1.0f }; break; // 橙（D）
+        //case 2: col = { 1.0f, 1.0f, 0.3f, 1.0f }; break; // 黄（F）
+        //case 3: col = { 0.3f, 1.0f, 0.3f, 1.0f }; break; // 緑（J）
+        //case 4: col = { 0.3f, 0.7f, 1.0f, 1.0f }; break; // 青（K）
+        //case 5: col = { 0.7f, 0.3f, 1.0f, 1.0f }; break; // 紫（L）
+        //default:col = { 1.0f, 1.0f, 1.0f, 1.0f }; break; // 白（不明）
+        //}
+
+        //// XZ 平面上の矩形（4頂点）
+        //Vector3 v0 = pos + Vector3(-hw, 0, -hd);
+        //Vector3 v1 = pos + Vector3(hw, 0, -hd);
+        //Vector3 v2 = pos + Vector3(hw, 0, hd);
+        //Vector3 v3 = pos + Vector3(-hw, 0, hd);
+
+        //m_primitiveBatch->DrawQuad(
+        //    VertexPositionColor(v0, col),
+        //    VertexPositionColor(v1, col),
+        //    VertexPositionColor(v2, col),
+        //    VertexPositionColor(v3, col)
+        //);
     }
 
     m_primitiveBatch->End();
@@ -1970,6 +2131,10 @@ void Game::Render()
                 ImVec2(screenPos.x, screenPos.y), radius* pulse * 1.6f,
                 IM_COL32(255, 160, 60, alpha / 2), 24, 2.0f
             );
+
+            //ImU32 col = IM_COL32((int)(255 * (1.0f - ratio)), (int)(255 * ratio), 60, 220);
+            //ImGui::GetForegroundDrawList()->AddCircle(
+            //    ImVec2(screenPos.x, screenPos.y), 25.0f * ratio + 8.0f, col, 32, 3.0f);
         }
 
         for (int i = 0; i < 6; i++)
@@ -1991,6 +2156,35 @@ void Game::Render()
             float age = 1.0f - (m_judggeEffects[i].timer / 0.5f);   //0->1
             DrawJuddgeBurst(ImGui::GetForegroundDrawList(),
                 ImVec2(screenPos.x, screenPos.y), age, m_judggeEffects[i].rank);
+            //ID3D11ShaderResourceView* tex =
+            //    (m_judggeEffects[i].rank == 0) ? perfectTexture :
+            //    (m_judggeEffects[i].rank == 1) ? greatTexture : goodTexture;
+            //if (!tex) continue;
+
+            //auto pos3D = judggeCircles[i].GetPosition(now);
+            //pos3D.y += 40.0f;   //判定円より上
+            //pos3D.z += 40.0f;
+
+            //XMVECTOR worldVec = XMLoadFloat3(&pos3D);
+            //XMVECTOR screenVec = XMVector3Project(
+            //    worldVec, 0.0f, 0.0f, screenW, screenH, 0.0f, 1.0f, m_proj, m_view, XMMatrixIdentity()
+            //);
+
+            //XMFLOAT3 screenPos;
+            //XMStoreFloat3(&screenPos, screenVec);
+            //if (screenPos.z >= 1.0f) continue;
+
+            ////RECT srcRect = { 0,0,128,64 };  //画像サイズに調整
+            //RECT srcRect = { 0,0,778,247 };  //画像サイズに調整
+            //DirectX::XMFLOAT2 origin = { 64.0f,32.0f };
+
+            ////タイマー残量でフェードアウト
+            //float alpha = m_judggeEffects[i].timer / 0.5f;
+            //DirectX::XMVECTORF32 color = { 1.0f,1.0f,1.0f,alpha };
+
+            //spriteBatch->Draw(tex,
+            //    DirectX::XMFLOAT2(screenPos.x, screenPos.y),
+            //    &srcRect, color, 0.0f, origin, 1.0f);
         }
         spriteBatch->End();
 
@@ -2000,6 +2194,10 @@ void Game::Render()
         context->RSSetState(m_states->CullNone());
     }
 
+    // ── 3Dモデル描画（note モデルがロードされている場合のみ）────
+    //float now = (bgmstate == BGMstate::play)
+    //    ? musicTime
+    //    : editorBeat * (60.0f / bpm);
 
     if (m_noteModel)
     {
@@ -2014,6 +2212,18 @@ void Game::Render()
             DirectX::SimpleMath::Vector3 pos = EvaluateNotePositionForPlay(note, now, highSpeed);
             DirectX::SimpleMath::Vector3 tint;
 
+            //DirectX::SimpleMath::Vector3 pos;
+            //if (bgmstate != BGMstate::play)
+            //{
+            //    pos = note.spawnPos;
+            //}
+            //else
+            //{
+            //    if (now < st || now > et) continue; // 表示範囲外はスキップ
+            //    pos = EvaluateNotePosition(note, now);
+            //}
+
+            //DirectX::SimpleMath::Vector3 tint;
             switch (note.lane)
             {
             case 0: tint = { 1.0f, 0.3f, 0.3f }; break; // 赤（S）
@@ -2035,6 +2245,8 @@ void Game::Render()
             m_noteModel->SetTintColor(tint);
             m_noteModel->Draw(context, *m_states, world, m_view, m_proj);
 
+            // デバッグ用テキスト（毎フレームノーツ数分表示されるので重い。本番では削除推奨）
+            //ImGui::Text("now: %.2f  displayStart: %.2f  et: %.2f", now, st, et);
         }
     }
 
@@ -2050,6 +2262,15 @@ void Game::Render()
 
             if (now < st || now > et) continue;
             DirectX::SimpleMath::Vector3 pos = EvaluateNotePositionForPlay(note, now, highSpeed);
+            //if (bgmstate != BGMstate::play)
+            //{
+            //    pos = note.spawnPos;
+            //}
+            //else
+            //{
+            //    if (now < st || now > et) continue; // 表示範囲外はスキップ
+            //    pos = EvaluateNotePosition(note, now);
+            //}
 			float dirScaleX = (note.note == FLICK_RIGHT) ? 1.0f : -1.0f;    //反転するか否か
 
             // スケールは常に正の値（反転は使わない）
@@ -2076,8 +2297,7 @@ void Game::Render()
 
     {
         constexpr float kGraceTime = 0.5f; // arrivalTime を過ぎても動き続ける猶予時間
-        constexpr float kBodySpacing = 0.2f;    //ここの値を小さくすればするほどロングノーツの描画が鮮明になる。
-        //ただし0.005でhuka.jsonをまわしたらおそらく落ちる(追記：0.02でまわしたところGPU使用率が90%を超えたのでここら辺が限界か？)
+        constexpr float kBodySpacing = 0.005f;
 		constexpr float kOverlapSentan = 0.025f; // dou/oに食い込ませる猶予（秒）。モデルサイズに応じて調整
 		constexpr float kOverlapO = 0.005f; // sentan/douに食い込ませる猶予（秒）。モデルサイズに応じて調整
 
@@ -2537,17 +2757,6 @@ void Game::LoadChart(std::string name)
             else
             {
                 m_AudioDurationSeconds = sound.GetDynamicDurationSeconds(); //曲の長さを取得
-
-                sound.ComputeEnvelope((int)m_audioEnvelopeBucketsPerSec, m_audioEnvelope);
-
-                float maxV = 0.0f;
-                for (float v : m_audioEnvelope) maxV = std::max(maxV, v);
-                if (maxV > 0.0001f)
-                    for (float& v : m_audioEnvelope) v /= maxV;
-
-                constexpr float kEnvelopeGamma = 0.45f;
-                for (float& v : m_audioEnvelope)
-                    v = powf(std::clamp(v, 0.0f, 1.0f), kEnvelopeGamma);
             }
         }
         else
@@ -2719,16 +2928,11 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar |
         ImGuiWindowFlags_NoScrollWithMouse);
 
-    constexpr float kSpectrumW = 100.0f; //スペクトラム表示の帯の幅
     ImDrawList* draw = ImGui::GetWindowDrawList();
     ImVec2 origin = ImGui::GetCursorScreenPos();
     const int laneCount = 6;
-    float laneRegionW = regionW - kSpectrumW;
-    //float laneW = regionW / laneCount;
-    float laneW = laneRegionW / laneCount;
-    float spectrumX0 = origin.x + laneRegionW;
-    float spectrumX1 = origin.x + regionW;
-    float judgeY = origin.y + regionH - 10.0f;
+    float laneW = regionW / laneCount;
+    float judgeY = origin.y + regionH - 40.0f;
     const char* laneNames[] = { "S","D","F","J","K","L" };
 
     float secondsPerBeat = (bpm > 0) ? 60.0f / bpm : 0.5f;
@@ -2737,7 +2941,7 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
     if (bgmstate != BGMstate::play && ImGui::IsWindowHovered())
     {
         float wheel = ImGui::GetIO().MouseWheel;
-        if (wheel != 0.0f) m_EditorScrollTime += wheel * secondsPerBeat * 0.5f;
+        if (wheel != 0.0f) m_EditorScrollTime -= wheel * secondsPerBeat * 0.5f;
         float dt = ImGui::GetIO().DeltaTime;
         if (GetAsyncKeyState(VK_UP) & 0x8000)   m_EditorScrollTime += 5.0f * dt;
         if (GetAsyncKeyState(VK_DOWN) & 0x8000) m_EditorScrollTime -= 5.0f * dt;
@@ -2795,76 +2999,6 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
             }
         }
         ImGui::SetWindowFontScale(1.0f);
-    }
-
-    //オーディオスペクトラム
-    if (!m_audioEnvelope.empty())
-    {
-        draw->AddRectFilled(
-            ImVec2(spectrumX0, origin.y),
-            ImVec2(spectrumX1, judgeY),
-            IM_COL32(10, 10, 14, 255)
-        );
-
-        float topTime = YToTime(origin.y);
-        float bottomTime = YToTime(judgeY);
-        float minT = std::min(topTime, bottomTime);
-        float maxT = std::max(topTime, bottomTime);
-
-        int bucketStart = std::max(0, (int)(minT * m_audioEnvelopeBucketsPerSec) - 1);
-        int bucketEnd = std::min((int)m_audioEnvelope.size() - 1, (int)(maxT * m_audioEnvelopeBucketsPerSec) + 1);
-
-        auto LevelToColor = [](float level) ->ImU32
-            {
-                level = std::clamp(level, 0.0f, 1.0f);
-
-                struct ColorStop { float pos; int r, g, b; };
-                static const ColorStop stops[] = {
-                    { 0.0f,  40,  60, 255 }, // 青
-                    { 0.35f, 40, 220, 120 }, // 緑
-                    { 0.65f, 255, 220,  40 }, // 黄
-                    { 1.0f,  255,  50,  50 }, // 赤
-                };
-
-                for (int i = 0; i < 3; i++)
-                {
-                    if (level >= stops[i].pos && level <= stops[i + 1].pos)
-                    {
-                        float t = (level - stops[i].pos) / (stops[i + 1].pos - stops[i].pos);
-                        int r = (int)(stops[i].r + (stops[i + 1].r - stops[i].r) * t);
-                        int g = (int)(stops[i].g + (stops[i + 1].g - stops[i].g) * t);
-                        int b = (int)(stops[i].b + (stops[i + 1].b - stops[i].b) * t);
-                        return IM_COL32(r, g, b, 255);
-                    }
-                }
-                return IM_COL32(255, 50, 50, 255);
-            };
-
-        float bucketDuration = 1.0f / m_audioEnvelopeBucketsPerSec;
-        float barMaxWidth = kSpectrumW - 8.0f;
-
-        for (int i = bucketStart; i <= bucketEnd; i++)
-        {
-            float t0 = i * bucketDuration;
-            float t1 = t0 + bucketDuration;
-            float y0 = TimeToY(t0);
-            float y1 = TimeToY(t1);
-            if (y1 > origin.y - 2.0f && y0 < judgeY + 2.0f)
-            {
-                float level = m_audioEnvelope[i];
-                float w = 2.0f + barMaxWidth * level;
-                ImU32 col = LevelToColor(level);
-
-                draw->AddRectFilled(
-                    ImVec2(spectrumX0 + 4.0f, std::min(y0, y1)),
-                    ImVec2(spectrumX0 + 4.0f + w, std::max(y0, y1) + 1.0f),
-                    col
-                );
-            }
-        }
-        // 現在時刻ラインの位置にも軽く強調線
-        draw->AddLine(ImVec2(spectrumX0, judgeY), ImVec2(spectrumX1, judgeY),
-            IM_COL32(255, 70, 70, 200), 2.0f);
     }
 
     // ── NOWライン ──
@@ -3273,6 +3407,49 @@ void Game::JudggeLane(char key, int laneIndex)
         success++;
         return; //TAPを処理したからロングの処理はしない
     }
+
+ //   //ロングノーツの判定
+ //   int bestLongIndex = -1;
+	//float bestLongDiff = 9999.9f;
+
+ //   for(int i = 0; i < (int)notes.size(); i++)
+ //   {
+ //       if(notes[i].lane != targetLane) continue;
+ //       if(notes[i].note != LONGNOTE) continue;
+	//	if (notes[i].longStarted || notes[i].longFailed) continue;   //すでに判定済みのロングノーツはスルー
+
+ //       float diff = fabsf(notes[i].arrivalTime - musicTime);  //timeではなくarrivalTimeで判定
+ //       if (diff < bestLongDiff)
+ //       {
+ //           bestLongDiff = diff;
+ //           bestLongIndex = i;
+ //       }
+	//}
+ //   if (bestLongIndex != -1 && bestLongDiff <= kGud)
+ //   {
+	//	auto& n = notes[bestLongIndex];
+ //       int rank =
+ //           (bestLongDiff < kPerfect) ? 0 :
+	//		(bestLongDiff < kGreat) ? 1 : 2;
+
+ //       m_judggeEffects[laneIndex].rank = rank;
+ //       m_judggeEffects[laneIndex].timer = 0.5f;
+ //       if (rank == 0)
+ //       {
+ //           perfect++;
+ //       }
+ //       else if (rank == 1)
+ //       {
+ //           great++;
+ //       }
+ //       else if (rank == 2)
+ //       {
+ //           good++;
+	//	}
+	//	//sound.Play(ロングの音);
+ //       n.longStarted = true;
+ //       n.nextTickTime = n.arrivalTime + kLongTickInterval;
+ //   }
 }
 
 // JudgeFlickNotes : 横フリック判定（時間ベース）
@@ -3301,6 +3478,11 @@ void Game::JudggeFlickNotes()
             int rank =
                 (absDiff < kPerfect) ? 0 :
                 (absDiff < kGreat) ? 1 : 2;
+    //        if (n.lane >= 0 && n.lane < 6)
+    //        {
+				//m_judggeEffects[n.lane].rank = rank;    // 判定エフェクトのランクを設定
+				//m_judggeEffects[n.lane].timer = 0.5f;   // 判定エフェクトの表示時間をリセット
+    //        }
 
 			//レーン範囲（From~To）を求めて、その範囲内のレーンに判定エフェクトを表示する
             int laneFrom = n.lane;
@@ -3614,6 +3796,34 @@ void Game::GetDefaultSize(int& width, int& height) const noexcept
     width = 1920;
     height = 1080;
 }
+
+// DrawThickBeam : from→to を結ぶ、太さ指定可能なビームをクワッドで描画
+// カメラ方向を基準に垂直な面を作ることで、常にカメラ側を向く
+//void Game::DrawThickBeam(const DirectX::SimpleMath::Vector3& from, const DirectX::SimpleMath::Vector3& to, float thickness, DirectX::XMVECTORF32 color)
+//{
+//	Vector3 dir = to - from;
+//    float len = dir.Length();
+//	if (len < 0.01f) return; // 長さがほぼゼロなら描画しない
+//	dir.Normalize();
+//
+//	Vector3 toCam = m_camPos - from;
+//	Vector3 side = dir.Cross(toCam);    // ビーム方向とカメラ方向の外積で垂直ベクトルを求める
+//	if (side.LengthSquared() < 0.0001f) side = Vector3::Up; // 外積がほぼゼロなら上方向を代用
+//	side.Normalize();
+//	side *= thickness * 0.5f;   // ビームの半分の厚さ
+//
+//	Vector3 v0 = from - side; // クワッドの4頂点
+//	Vector3 v1 = from + side;
+//	Vector3 v2 = to + side;
+//	Vector3 v3 = to - side;
+//
+//	m_primitiveBatch->DrawQuad( // 4頂点のクワッドを描画
+//        VertexPositionColor(v0, color),
+//        VertexPositionColor(v1, color),
+//        VertexPositionColor(v2, color),
+//        VertexPositionColor(v3, color)
+//	);
+//}
 
 void Game::DrawThickBeam(const DirectX::SimpleMath::Vector3& from, const DirectX::SimpleMath::Vector3& to, float thicknessFrom, float thicknessTo, DirectX::XMVECTORF32 coreColor, DirectX::XMVECTORF32 glowColor)
 {

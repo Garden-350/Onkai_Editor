@@ -5,8 +5,6 @@
 #include <mfreadwrite.h>
 #include <algorithm>
 #include <mferror.h>
-#include <cstdint>
-#include <cmath>
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfreadwrite.lib")
 #pragma comment(lib, "mfuuid.lib")
@@ -422,46 +420,6 @@ void Sound::SetVolumeDynamic(float volume)
 {
 	if (!m_pDynamicVoice) return;
 	m_pDynamicVoice->SetVolume(volume);
-}
-
-void Sound::ComputeEnvelope(int bucketsPerSecond, std::vector<float>& outLevels) const
-{
-	outLevels.clear();
-	if (!m_dynamicData || m_dynamicBuffer.AudioBytes == 0) return;
-
-	const WAVEFORMATEX& fmt = m_dynamicWfx.Format;
-	int channels = fmt.nChannels;
-	int bitsPerSample = fmt.wBitsPerSample;
-	int sampleRate = fmt.nSamplesPerSec;
-
-	if (channels <= 0 || sampleRate <= 0 || bitsPerSample != 16)
-	{
-		return;	//16bits以外は非対応　必要に応じて拡張
-	}
-	int frameSize = (bitsPerSample / 8) * channels;
-	DWORD totalFrames = m_dynamicBuffer.AudioBytes / frameSize;
-	int framePerBucket = std::max(1, sampleRate / bucketsPerSecond);
-
-	const int16_t* samples = reinterpret_cast<const int16_t*>(m_dynamicData);
-
-	for (DWORD frame = 0; frame < totalFrames; frame += framePerBucket)
-	{
-		DWORD frameEnd = std::min<DWORD>(frame + framePerBucket, totalFrames);
-		double sumSq = 0.0;
-		DWORD count = 0;
-		for (DWORD f = frame; f < frameEnd; f++)
-		{
-			int32_t sum = 0;
-			for (int c = 0; c < channels; c++)
-			{
-				sum += samples[(size_t)f * channels + c];
-			}
-			float v = (float)(sum / channels) / 32768.0f;
-			sumSq += (double)v * v;
-			count++;
-		}
-		outLevels.push_back(count > 0 ? (float)sqrt(sumSq / count) : 0.0f);
-	}
 }
 
 float Sound::GetDynamicDurationSeconds() const

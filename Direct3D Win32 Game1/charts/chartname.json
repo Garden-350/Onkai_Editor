@@ -1,12 +1,8 @@
 {
 "meta":{"bpm":120,"totalBeat":1000,"audioFile":"hisou.wav"},
 "notes":[
-{"lane":5,"type":1,"time":5,"spawnTime":0,"arrivalTime":0.5,"flickLaneTo":-1,"holdDuration":1,"spawnPos":{"x":-260,"y":0,"z":1000},"judgePos":{"x":-260,"y":-55,"z":-210}},
-{"lane":4,"type":1,"time":5,"spawnTime":0,"arrivalTime":0.5,"flickLaneTo":-1,"holdDuration":1,"spawnPos":{"x":-170,"y":0,"z":1000},"judgePos":{"x":-170,"y":-55,"z":-210}},
-{"lane":3,"type":1,"time":5,"spawnTime":0,"arrivalTime":0.5,"flickLaneTo":-1,"holdDuration":1,"spawnPos":{"x":-80,"y":0,"z":1000},"judgePos":{"x":-80,"y":-55,"z":-210}},
-{"lane":2,"type":1,"time":5,"spawnTime":0,"arrivalTime":0.5,"flickLaneTo":-1,"holdDuration":1,"spawnPos":{"x":10,"y":0,"z":1000},"judgePos":{"x":10,"y":-55,"z":-210}},
-{"lane":1,"type":1,"time":5,"spawnTime":0,"arrivalTime":0.5,"flickLaneTo":-1,"holdDuration":1,"spawnPos":{"x":100,"y":0,"z":1000},"judgePos":{"x":100,"y":-55,"z":-210}},
-{"lane":0,"type":1,"time":5,"spawnTime":0,"arrivalTime":0.5,"flickLaneTo":-1,"holdDuration":1,"spawnPos":{"x":190,"y":0,"z":1000},"judgePos":{"x":190,"y":-55,"z":-210}}
+{"lane":0,"type":0,"time":5.5,"spawnTime":0.5,"arrivalTime":2.66,"flickLaneTo":-1,"holdDuration":0,"spawnPos":{"x":190,"y":0,"z":1000},"judgePos":{"x":190,"y":-55,"z":-210}},
+{"lane":1,"type":1,"time":3.26667,"spawnTime":0,"arrivalTime":2.26667,"flickLaneTo":-1,"holdDuration":1,"spawnPos":{"x":100,"y":0,"z":1000},"judgePos":{"x":100,"y":-55,"z":-210}}
 ],
 "beams":[
 ],
