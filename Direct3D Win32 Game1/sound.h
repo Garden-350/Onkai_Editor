@@ -95,6 +95,8 @@ public:
 	void SetPlayPositionSecondsDynamic(float seconds);
 	void SeekSecondsDynamic(float seconds);
 	void SetVolumeDynamic(float volume);
+	void SetPlaybackSpeedDynamic(float ratio);
 	void ComputeEnvelope(int bucketsPerSecond, std::vector<float>& outLevels) const;
+	float EstimateBPM(float minBPM = 60.0f, float maxBPM = 200.0f) const;
 	float GetDynamicDurationSeconds() const;
 };

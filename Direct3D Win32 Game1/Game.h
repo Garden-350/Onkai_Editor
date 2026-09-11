@@ -290,6 +290,27 @@ private:
     float m_EditorPxPerSec = 150.0f;
     float m_audioEnvelopeBucketsPerSec = 120.0f; //1秒あたりのサンプリング回数
 
+    //判定円のドラッグ操作用
+    bool m_DraggingJudgeCircle = false;
+    int m_DraggingJudgeCircleLane = -1;
+    DirectX::SimpleMath::Vector3 m_DragPreviewPos = {};
+
+    struct PendingKeyframeEdit
+    {
+        bool active = false;
+        int lane = -1;
+		int arrivalIndex = -1;     // 到達キーフレームのインデックス
+        int departureIndex = -1;   // 出発キーフレームのインデックス
+        float departureTime = 0.0f; // 出発（動き始める）時刻
+        float arrivalTime = 0.0f;   // 到達時刻
+        float arrivalX = 0.0f;      // 到達X
+        float arrivalZ = 0.0f;      // 到達Z
+        float fixedY = 0.0f;        // このドラッグで固定されているY（編集対象外）
+    };
+    PendingKeyframeEdit m_PendingKeyframeEdit;
+    //再生速度(1.0が等倍、下げるとゆっくり再生)
+    float m_PlaybackSpeed = 1.0f;
+
     //ビーム配置UI用の一時入力値
     float m_newBeamChargeTime = 0.0f;
 	float m_newBeamLockTime = 1.0f;

@@ -697,6 +697,92 @@ void Game::Update(DX::StepTimer const& timer)
         rayDir = farPoint - nearPoint;
         rayDir.Normalize();
 
+        //判定円のドラッグ操作
+        if (m_GameMode == GameMode::Play3D)
+        {
+            //判定円描画と同じ計算
+            float now = (bgmstate == BGMstate::play)
+				? musicTime : editorBeat * (60.0f / bpm);
+
+            if (!m_DraggingJudgeCircle && !m_PendingKeyframeEdit.active && mousePressed)
+            {
+                //クリック位置に一番近い判定円を探索
+				float bestDist = 40.0f; //半径40以内なら選択
+                int bestLane = -1;
+                for (int i = 0; i < (int)judggeCircles.size(); i++)
+                {
+                    Vector3 pos3D = judggeCircles[i].GetPosition(now);
+                    XMVECTOR worldVec = XMLoadFloat3(&pos3D);
+                    XMVECTOR screenVec = XMVector3Project(
+                        worldVec, 0.0f, 0.0f, screenW, screenH, 0.0f, 1.0f,
+                        m_proj, m_view, XMMatrixIdentity());
+                    XMFLOAT3 screenPos;
+                    XMStoreFloat3(&screenPos, screenVec);
+                    if (screenPos.z >= 1.0f) continue; // カメラ後方
+
+                    float dx = mouseX - screenPos.x;
+                    float dy = mouseY - screenPos.y;
+                    float dist = sqrtf(dx * dx + dy * dy);
+                    if (dist < bestDist)
+                    {
+                        bestDist = dist;
+                        bestLane = i;
+                    }
+				}
+                if (bestLane >= 0)
+                {
+					m_DraggingJudgeCircle = true;
+					m_DraggingJudgeCircleLane = bestLane;
+					m_DragPreviewPos = judggeCircles[bestLane].GetPosition(now);
+                }
+            }
+            else if (m_DraggingJudgeCircle && mouseDown)
+            {
+                //ドラッグ中：XY平面での移動
+                float fixedY = m_DragPreviewPos.y;
+                if (fabsf(rayDir.y) > 1e-5f)
+                {
+                    float t = (fixedY - nearPoint.y) / rayDir.y;
+                    if (t > 0.0f)
+                    {
+                        Vector3 hit = nearPoint + rayDir * t;
+                        m_DragPreviewPos.x = hit.x;
+                        m_DragPreviewPos.z = hit.z;
+                    }
+                }
+            }
+            else if (m_DraggingJudgeCircle && !mouseDown)
+            {
+                // 離した瞬間：即確定せず、出発/到達を編集するポップを開く
+                auto& circle = judggeCircles[m_DraggingJudgeCircleLane];
+
+                // 到達時刻(now)の直前にあるキーフレーム＝出発キーフレームを探す
+                int departureIdx = 0;
+                float bestTime = -1e9f;
+                for (int k = 0; k < (int)circle.keyframe.size(); k++)
+                {
+                    if (circle.keyframe[k].time <= now && circle.keyframe[k].time > bestTime)
+                    {
+                        bestTime = circle.keyframe[k].time;
+                        departureIdx = k;
+                    }
+                }
+
+                m_PendingKeyframeEdit.active = true;
+                m_PendingKeyframeEdit.lane = m_DraggingJudgeCircleLane;
+				m_PendingKeyframeEdit.arrivalIndex = -1;
+                m_PendingKeyframeEdit.departureIndex = departureIdx;
+                m_PendingKeyframeEdit.departureTime = circle.keyframe[departureIdx].time;
+                m_PendingKeyframeEdit.arrivalTime = now;
+                m_PendingKeyframeEdit.arrivalX = m_DragPreviewPos.x;
+                m_PendingKeyframeEdit.arrivalZ = m_DragPreviewPos.z;
+                m_PendingKeyframeEdit.fixedY = m_DragPreviewPos.y;
+
+                m_DraggingJudgeCircle = false;
+                m_DraggingJudgeCircleLane = -1;
+            }
+        }
+
         DirectX::SimpleMath::Vector3 camForward = DirectX::SimpleMath::Vector3(m_camLook) - DirectX::SimpleMath::Vector3(m_camPos);
         camForward.Normalize();
         constexpr float PlaneDistance = 500.0f; //  カメラからの距離（任意調整）
@@ -724,7 +810,7 @@ void Game::Update(DX::StepTimer const& timer)
         }
 
         // ── 左クリック時の処理：エディタ状態機械 ──────────────────────
-        if (mousePressed && hasHit)
+        if (mousePressed && hasHit && !m_DraggingJudgeCircle)
         {
             float worldX = worldPos.x;
             float worldZ = worldPos.z;
@@ -1060,7 +1146,7 @@ void Game::Update(DX::StepTimer const& timer)
     if (bgmstate == BGMstate::play)
     {
         if (highSpeed < 0.1f) highSpeed = 0.1f;
-        musicTime += elapsedTime;
+        musicTime += elapsedTime * m_PlaybackSpeed;
 
         if (m_AudioDurationSeconds > 0.0f && musicTime >= m_AudioDurationSeconds)
         {
@@ -1136,6 +1222,10 @@ void Game::Render()
     // ── レイアウト計算 ─────────────────────────
     float screenW = ImGui::GetIO().DisplaySize.x;
     float screenH = ImGui::GetIO().DisplaySize.y;
+    if (screenW <= 0.0f || screenH <= 0.0f)
+    {
+        return;
+    }
     float leftW = 250.0f;   // 左パネルの幅
     float rightW = 240.0f;
     float bottomH = 60.0f;    // 下バーの高さ
@@ -1143,7 +1233,7 @@ void Game::Render()
     float chartH = screenH - bottomH; // 3Dビューの高さ
 
     // ── View / Projection 行列の設定 ─────────────
-    float aspect = chartW / chartH;
+    float aspect = screenW / screenH;
 
     m_camAspect = chartW / chartH;
     m_view = DirectX::SimpleMath::Matrix(
@@ -1354,6 +1444,11 @@ void Game::Render()
         // ハイスピード倍率スライダー（ノーツの移動速度）
         ImGui::SliderFloat("HighSpeed", &highSpeed, 0.1f, 15.0f);
         ImGui::SliderFloat("Note Scale", &noteScale, 0.1f, 15.0f);
+        // 再生速度スライダー（曲とノーツの時間進行を一緒に遅くする）
+        if (ImGui::SliderFloat("Playback Speed", &m_PlaybackSpeed, 0.25f, 1.0f))
+        {
+            sound.SetPlaybackSpeedDynamic(m_PlaybackSpeed);
+        }
         if (m_EditorState == EditorState::PLACING_SPAWN || m_EditorState == EditorState::PLACING_JUDGE)
         {
             ImGui::TextColored(ImVec4(0.6f, 1.0f, 1.0f, 1.0f),
@@ -1505,6 +1600,40 @@ void Game::Render()
         m_AudioFileName = m_AudioFileBuf;
         if (!m_AudioFileName.empty())
             ImGui::TextDisabled("-> asset/bgm/%s", m_AudioFileBuf);
+        //BPM
+        ImGui::InputInt("BPM", &bpm);
+        if (bpm < 1) bpm = 1;
+        {
+            static std::string s_bpmDetectMessage;
+            static bool s_bpmDetectIsError = false;
+
+            if (ImGui::Button("Auto-detect BPM"))
+            {
+                float detected = sound.EstimateBPM();
+                if (detected > 0.0f)
+                {
+                    bpm = (int)std::round(detected);
+                    s_bpmDetectMessage = "Detected: " + std::to_string(bpm) + " BPM (use x2/\xF7""2 if it sounds off by an octave)";
+                    s_bpmDetectIsError = false;
+                }
+                else
+                {
+                    s_bpmDetectMessage = "Auto-detect failed. Is a song loaded? (set Audio File, then Save & Load once)";
+                    s_bpmDetectIsError = true;
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("x2")) bpm *= 2;
+            ImGui::SameLine();
+            if (ImGui::Button("/2")) bpm = std::max(1, bpm / 2);
+
+            if (!s_bpmDetectMessage.empty())
+            {
+                ImGui::TextColored(s_bpmDetectIsError ? ImVec4(1.0f, 0.4f, 0.4f, 1.0f) : ImVec4(0.5f, 1.0f, 0.5f, 1.0f),
+                    "%s", s_bpmDetectMessage.c_str());
+            }
+        }
+
         if (ImGui::Button("Save", ImVec2(90, 0)))
         {
             if (mirrorMode) mirrorMode = false;
@@ -1898,35 +2027,230 @@ void Game::Render()
         ImGui::End();
     }
 
-    ImGui::SetNextWindowPos(ImVec2(leftW + chartW, 0.0f));
-    ImGui::SetNextWindowSize(ImVec2(rightW, screenH - bottomH));
-
-    ImGui::Begin("Note Hierarchy", nullptr,
-        ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoCollapse);
-
-    ImGui::Text("Notes: %d", (int)notes.size());
-    ImGui::Separator();
-
-    const char* typeNames[] = { "TAP", "LONG", "FLICK R", "FLICK L" };
-
-    for (int i = 0; i < (int)notes.size(); ++i)
+    if (m_PendingKeyframeEdit.active)
     {
-        const Note& n = notes[i];
+        const char* laneNamesPopup[] = { "S","D","F","J","K","L" };
 
-        char label[96];
-        sprintf_s(label, "%03d  [%s]  %.2f -> %.2f",
-            i, typeNames[(int)n.note], n.GetSpawnTime(), n.arrivalTime);
+        ImGui::SetNextWindowPos(ImVec2(500.0f, 300.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(300.0f, 0.0f));
+        ImGui::Begin("Edit Keyframe", nullptr,
+            ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
 
-        if (ImGui::Selectable(label, selectedNoteIndex == i))
+        ImGui::Text("Lane: %s", laneNamesPopup[m_PendingKeyframeEdit.lane]);
+        ImGui::Separator();
+
+        ImGui::Text("Goal");
+        ImGui::InputFloat("Goal(s)", &m_PendingKeyframeEdit.arrivalTime, 0.1f);
+        ImGui::InputFloat("Goal X", &m_PendingKeyframeEdit.arrivalX, 1.0f);
+        ImGui::InputFloat("Goal Z", &m_PendingKeyframeEdit.arrivalZ, 1.0f);
+
+        if (m_PendingKeyframeEdit.departureIndex >= 0)
         {
-            selectedNoteIndex = i;
-            m_EditorState = EditorState::EDITING;
+            ImGui::Separator();
+            ImGui::Text("Go");
+            ImGui::InputFloat("Go(s)", &m_PendingKeyframeEdit.departureTime, 0.1f);
         }
+
+        ImGui::Separator();
+
+        bool canApply = (m_PendingKeyframeEdit.departureIndex < 0) ||
+            (m_PendingKeyframeEdit.departureTime < m_PendingKeyframeEdit.arrivalTime);
+
+        if (ImGui::Button("Apply", ImVec2(120, 0)))
+        {
+            if (canApply)
+            {
+                auto& circle = judggeCircles[m_PendingKeyframeEdit.lane];
+
+                if (m_PendingKeyframeEdit.departureIndex >= 0)
+                {
+                    // 出発キーフレームの時刻を更新
+                    circle.keyframe[m_PendingKeyframeEdit.departureIndex].time = m_PendingKeyframeEdit.departureTime;
+                }
+
+                if (m_PendingKeyframeEdit.arrivalIndex >= 0)
+                {
+                    // 既存キーフレームを編集
+                    auto& key = circle.keyframe[m_PendingKeyframeEdit.arrivalIndex];
+                    key.time = m_PendingKeyframeEdit.arrivalTime;
+                    key.x = m_PendingKeyframeEdit.arrivalX;
+                    key.y = m_PendingKeyframeEdit.fixedY;
+                    key.z = m_PendingKeyframeEdit.arrivalZ;
+                }
+                else
+                {
+                    // 到達キーフレームを新規追加
+                    circle.keyframe.push_back({
+                        m_PendingKeyframeEdit.arrivalTime,
+                        m_PendingKeyframeEdit.arrivalX,
+                        m_PendingKeyframeEdit.fixedY,
+                        m_PendingKeyframeEdit.arrivalZ
+                        });
+                }
+
+                std::sort(circle.keyframe.begin(), circle.keyframe.end(),
+                    [](const JudggeCircleframe& a, const JudggeCircleframe& b) {
+                        return a.time < b.time;
+                    });
+
+                m_PendingKeyframeEdit.active = false;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0)))
+        {
+            m_PendingKeyframeEdit.active = false;
+        }
+
+        if (m_PendingKeyframeEdit.arrivalIndex >= 0 &&
+            judggeCircles[m_PendingKeyframeEdit.lane].keyframe.size() > 1)
+        {
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.15f, 0.15f, 1.0f));
+            if (ImGui::Button("Delete", ImVec2(100, 0)))
+            {
+                auto& kf = judggeCircles[m_PendingKeyframeEdit.lane].keyframe;
+                kf.erase(kf.begin() + m_PendingKeyframeEdit.arrivalIndex);
+                m_PendingKeyframeEdit.active = false;
+            }
+            ImGui::PopStyleColor();
+        }
+
+        if (!canApply)
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Please set the departure time to be earlier than the arrival time.");
+        }
+
+        ImGui::End();
     }
 
-    ImGui::End();
+    if (m_GameMode != GameMode::Play3D)
+    {
+        ImGui::SetNextWindowPos(ImVec2(leftW + chartW, 0.0f));
+        ImGui::SetNextWindowSize(ImVec2(rightW, screenH - bottomH));
+
+        ImGui::Begin("Note Hierarchy", nullptr,
+            ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoCollapse);
+
+        ImGui::Text("Notes: %d", (int)notes.size());
+        ImGui::Separator();
+
+        const char* typeNames[] = { "TAP", "LONG", "FLICK R", "FLICK L" };
+
+        for (int i = 0; i < (int)notes.size(); ++i)
+        {
+            const Note& n = notes[i];
+
+            char label[96];
+            sprintf_s(label, "%03d  [%s]  %.2f -> %.2f",
+                i, typeNames[(int)n.note], n.GetSpawnTime(), n.arrivalTime);
+
+            if (ImGui::Selectable(label, selectedNoteIndex == i))
+            {
+                selectedNoteIndex = i;
+                m_EditorState = EditorState::EDITING;
+            }
+        }
+
+        ImGui::End();
+    }
+    else
+    {
+        // ── 判定円のキーフレームを、ノーツのように横並びのタイムラインで表示 ──
+        ImGui::SetNextWindowPos(ImVec2(leftW + chartW, 0.0f));
+        ImGui::SetNextWindowSize(ImVec2(rightW, screenH - bottomH));
+
+        ImGui::Begin("Judge Circle Timeline", nullptr
+ /*           ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoCollapse*/);
+
+        float secondsPerBeatTL = 60.0f / bpm;
+        float nowTL = (bgmstate == BGMstate::play) ? musicTime : editorBeat * secondsPerBeatTL;
+        float spanTL = (m_AudioDurationSeconds > 0.0f) ? m_AudioDurationSeconds : totalBeat * secondsPerBeatTL;
+        if (spanTL < 1.0f) spanTL = 1.0f;
+
+        const char* laneNamesTL[] = { "S","D","F","J","K","L" };
+        float rowH = 30.0f;
+        float trackW = ImGui::GetContentRegionAvail().x - 30.0f;
+
+        for (int lane = 0; lane < (int)judggeCircles.size(); lane++)
+        {
+            auto& circle = judggeCircles[lane];
+
+            ImGui::Text("%s", laneNamesTL[lane]);
+            ImGui::SameLine(30.0f);
+
+            ImVec2 rowPos = ImGui::GetCursorScreenPos();
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+
+            // ベースライン
+            draw->AddLine(
+                ImVec2(rowPos.x, rowPos.y + rowH * 0.5f),
+                ImVec2(rowPos.x + trackW, rowPos.y + rowH * 0.5f),
+                IM_COL32(120, 120, 130, 255), 2.0f);
+
+            // 現在時刻の縦線
+            float nowX = rowPos.x + (nowTL / spanTL) * trackW;
+            draw->AddLine(
+                ImVec2(nowX, rowPos.y), ImVec2(nowX, rowPos.y + rowH),
+                IM_COL32(255, 220, 80, 200), 2.0f);
+
+            for (int k = 0; k < (int)circle.keyframe.size(); k++)
+            {
+                auto& key = circle.keyframe[k];
+                float t = key.time / spanTL;
+                if (t < 0.0f) t = 0.0f;
+                if (t > 1.0f) t = 1.0f;
+                float px = rowPos.x + t * trackW;
+
+                ImGui::PushID(lane * 1000 + k);
+                ImGui::SetCursorScreenPos(ImVec2(px - 7.0f, rowPos.y + rowH * 0.5f - 7.0f));
+                ImGui::InvisibleButton("kf", ImVec2(14.0f, 14.0f));
+                bool hovered = ImGui::IsItemHovered();
+                bool clicked = ImGui::IsItemClicked();
+
+                ImU32 col = (k == 0) ? IM_COL32(140, 200, 255, 255) : IM_COL32(255, 160, 90, 255);
+                if (hovered) col = IM_COL32(255, 255, 255, 255);
+                draw->AddCircleFilled(ImVec2(px, rowPos.y + rowH * 0.5f), 6.0f, col);
+
+                if (hovered)
+                {
+                    ImGui::SetTooltip("t=%.2fs  x=%.1f  y=%.1f  z=%.1f", key.time, key.x, key.y, key.z);
+                }
+
+                if (clicked && !m_PendingKeyframeEdit.active)
+                {
+                    m_PendingKeyframeEdit.active = true;
+                    m_PendingKeyframeEdit.lane = lane;
+                    m_PendingKeyframeEdit.arrivalIndex = k;
+                    m_PendingKeyframeEdit.arrivalTime = key.time;
+                    m_PendingKeyframeEdit.arrivalX = key.x;
+                    m_PendingKeyframeEdit.arrivalZ = key.z;
+                    m_PendingKeyframeEdit.fixedY = key.y;
+
+                    if (k > 0)
+                    {
+                        m_PendingKeyframeEdit.departureIndex = k - 1;
+                        m_PendingKeyframeEdit.departureTime = circle.keyframe[k - 1].time;
+                    }
+                    else
+                    {
+                        m_PendingKeyframeEdit.departureIndex = -1;
+                        m_PendingKeyframeEdit.departureTime = 0.0f;
+                    }
+                }
+                ImGui::PopID();
+            }
+
+            ImGui::SetCursorScreenPos(ImVec2(rowPos.x, rowPos.y + rowH));
+        }
+
+        ImGui::End();
+    }
+
 
     // ════════════════════════════════════════════
     // DirectX PrimitiveBatch による 3D 描画
@@ -2175,10 +2499,15 @@ void Game::Render()
         auto spriteBatch = std::make_unique<DirectX::SpriteBatch>(context);
         spriteBatch->Begin();
 
-        for (auto& circle : judggeCircles)
+        for (int ci = 0; ci < (int)judggeCircles.size(); ci++)
         {
+            auto& circle = judggeCircles[ci];
             if (!circle.texture) continue;
-            auto pos3D = circle.GetPosition(now);
+            Vector3 pos3D =
+                (m_DraggingJudgeCircle && ci == m_DraggingJudgeCircleLane) ? m_DragPreviewPos :
+                (m_PendingKeyframeEdit.active && ci == m_PendingKeyframeEdit.lane)
+                ? Vector3(m_PendingKeyframeEdit.arrivalX, m_PendingKeyframeEdit.fixedY, m_PendingKeyframeEdit.arrivalZ)
+                : circle.GetPosition(now);
 
             //3D座標をスクリーン座標に変換
             XMVECTOR worldVec = XMLoadFloat3(&pos3D);
@@ -2710,7 +3039,8 @@ void Game::SaveChart(std::string name)
     file << "\"meta\":{"
         << "\"bpm\":" << bpm << ","
         << "\"totalBeat\":" << totalBeat << ","
-        << "\"audioFile\":\"" << m_AudioFileName << "\""
+        << "\"audioFile\":\"" << m_AudioFileName << "\","
+		<< "\"totalNotes\":" << notes.size()
         << "},\n";
 
     // ノーツ
@@ -2881,6 +3211,7 @@ void Game::LoadChart(std::string name)
             else
             {
                 m_AudioDurationSeconds = sound.GetDynamicDurationSeconds();
+                sound.SetPlaybackSpeedDynamic(m_PlaybackSpeed);
 
                 sound.ComputeEnvelope((int)m_audioEnvelopeBucketsPerSec, m_audioEnvelope);
 

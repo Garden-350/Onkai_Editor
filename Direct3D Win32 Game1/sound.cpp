@@ -424,6 +424,12 @@ void Sound::SetVolumeDynamic(float volume)
 	m_pDynamicVoice->SetVolume(volume);
 }
 
+void Sound::SetPlaybackSpeedDynamic(float ratio)
+{
+	if (!m_pDynamicVoice) return;
+	m_pDynamicVoice->SetFrequencyRatio(ratio);
+}
+
 void Sound::ComputeEnvelope(int bucketsPerSecond, std::vector<float>& outLevels) const
 {
 	outLevels.clear();
@@ -459,6 +465,82 @@ void Sound::ComputeEnvelope(int bucketsPerSecond, std::vector<float>& outLevels)
 		}
 		outLevels.push_back(count > 0 ? (float)sqrt(sumSq / count) : 0.0f);
 	}
+}
+
+//minBPM~maxBPMの間でラグをずらしながら自己相関を取る。一番一致するところを1拍とする
+float Sound::EstimateBPM(float minBPM, float maxBPM) const
+{
+	if (!m_dynamicData || m_dynamicBuffer.AudioBytes == 0) return 0.0f;
+
+	const WAVEFORMATEX& fmt = m_dynamicWfx.Format;
+	int channels = fmt.nChannels;
+	int bitsPerSample = fmt.wBitsPerSample;
+	int sampleRate = fmt.nSamplesPerSec;
+	if (channels <= 0 || sampleRate <= 0 || bitsPerSample != 16) return 0.0f;
+
+	const int kBucketsPerSec = 200; // 5msごと。テンポ分解能とノイズ耐性のバランス
+	int frameSize = (bitsPerSample / 8) * channels;
+	DWORD totalFrames = m_dynamicBuffer.AudioBytes / frameSize;
+	int framesPerBucket = std::max(1, sampleRate / kBucketsPerSec);
+	const int16_t* samples = reinterpret_cast<const int16_t*>(m_dynamicData);
+
+	// ── 1. エネルギー包絡線を作る ──
+	std::vector<float> envelope;
+	envelope.reserve(totalFrames / framesPerBucket + 1);
+	for (DWORD frame = 0; frame < totalFrames; frame += framesPerBucket)
+	{
+		DWORD frameEnd = std::min<DWORD>(frame + framesPerBucket, totalFrames);
+		double sumSq = 0.0;
+		DWORD count = 0;
+		for (DWORD f = frame; f < frameEnd; f++)
+		{
+			int32_t sum = 0;
+			for (int c = 0; c < channels; c++)
+				sum += samples[(size_t)f * channels + c];
+			float v = (float)(sum / channels) / 32768.0f;
+			sumSq += (double)v * v;
+			count++;
+		}
+		envelope.push_back(count > 0 ? (float)sqrt(sumSq / count) : 0.0f);
+	}
+	if (envelope.size() < 8) return 0.0f;
+
+	// ── 2. オンセット強度(立ち上がり分だけ)を抽出 ──
+	std::vector<float> onset(envelope.size(), 0.0f);
+	for (size_t i = 1; i < envelope.size(); i++)
+	{
+		float d = envelope[i] - envelope[i - 1];
+		onset[i] = (d > 0.0f) ? d : 0.0f;
+	}
+	double meanOnset = 0.0;
+	for (float v : onset) meanOnset += v;
+	meanOnset /= (double)onset.size();
+	for (float& v : onset) v -= (float)meanOnset;
+
+	// ── 3. minBPM~maxBPMの範囲で自己相関のピークを探す ──
+	auto bpmToLag = [&](float bpmVal) { return (int)std::round((60.0f / bpmVal) * kBucketsPerSec); };
+	int lagMin = std::max(1, bpmToLag(maxBPM));
+	int lagMax = std::min((int)onset.size() - 1, bpmToLag(minBPM));
+	if (lagMin >= lagMax) return 0.0f;
+
+	float bestScore = -1e30f;
+	int bestLag = lagMin;
+	for (int lag = lagMin; lag <= lagMax; lag++)
+	{
+		double sum = 0.0;
+		size_t n = onset.size() - lag;
+		for (size_t i = 0; i < n; i++)
+			sum += (double)onset[i] * onset[i + lag];
+		float score = (float)(sum / (double)n);
+		if (score > bestScore)
+		{
+			bestScore = score;
+			bestLag = lag;
+		}
+	}
+
+	if (bestLag <= 0) return 0.0f;
+	return 60.0f / ((float)bestLag / (float)kBucketsPerSec);
 }
 
 float Sound::GetDynamicDurationSeconds() const
