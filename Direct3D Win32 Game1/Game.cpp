@@ -32,6 +32,7 @@ std::vector<Beams> beams;          // ビームオブジェクト一覧
 std::vector<Note>  originalNotes;  // 再生前のノーツ状態を退避しておくバックアップ
 static char filename[64] = "chartname"; // セーブ／ロード時のファイル名バッファ
 static std::string g_chartStatusMessage;    //save/loadの結果メッセ
+static const std::filesystem::path kGameRoot = L"C:/Users/mawar/Desktop/3Dゲーム作成1";  //コピーする場所（今回は本環境に直接入れてます）
 static bool g_chartStatusIsError = false;   //成功：false 失敗: true
 //static float g_defaultTravelTime = 1.2f;
 //static float g_noteSpeed = 700.0f; // ノーツの移動速度（ワールド単位/秒）。大きいほど速く飛んでくる
@@ -1439,7 +1440,9 @@ void Game::Render()
         ImGui::SetNextWindowSize(ImVec2(leftW, screenH - bottomH));
         ImGui::Begin("LeftPanel", nullptr,
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
+            ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar |
+            ImGuiWindowFlags_NoBringToFrontOnFocus |
+            ImGuiWindowFlags_NoFocusOnAppearing);
 
         // ハイスピード倍率スライダー（ノーツの移動速度）
         ImGui::SliderFloat("HighSpeed", &highSpeed, 0.1f, 15.0f);
@@ -1601,8 +1604,8 @@ void Game::Render()
         if (!m_AudioFileName.empty())
             ImGui::TextDisabled("-> asset/bgm/%s", m_AudioFileBuf);
         //BPM
-        ImGui::InputInt("BPM", &bpm);
-        if (bpm < 1) bpm = 1;
+        ImGui::InputFloat("BPM", &bpm);
+        if (bpm < 1.0f) bpm = 1.0f;
         {
             static std::string s_bpmDetectMessage;
             static bool s_bpmDetectIsError = false;
@@ -1612,8 +1615,10 @@ void Game::Render()
                 float detected = sound.EstimateBPM();
                 if (detected > 0.0f)
                 {
-                    bpm = (int)std::round(detected);
-                    s_bpmDetectMessage = "Detected: " + std::to_string(bpm) + " BPM (use x2/\xF7""2 if it sounds off by an octave)";
+                    bpm = std::round(detected * 10.0f) / 10.0f;   // 小数第1位まで
+                    char buf[128];
+                    sprintf_s(buf, "Detected: %.1f BPM (use x2/\xF7""2 if it sounds off by an octave)", bpm);
+                    s_bpmDetectMessage = buf;
                     s_bpmDetectIsError = false;
                 }
                 else
@@ -1625,7 +1630,7 @@ void Game::Render()
             ImGui::SameLine();
             if (ImGui::Button("x2")) bpm *= 2;
             ImGui::SameLine();
-            if (ImGui::Button("/2")) bpm = std::max(1, bpm / 2);
+            if (ImGui::Button("/2")) bpm = std::max(1.0f, bpm * 0.5f);
 
             if (!s_bpmDetectMessage.empty())
             {
@@ -1634,10 +1639,14 @@ void Game::Render()
             }
         }
 
+
+        ImGui::Checkbox("Save to game too", &m_SaveToGameToo);
         if (ImGui::Button("Save", ImVec2(90, 0)))
         {
             if (mirrorMode) mirrorMode = false;
             SaveChart(filename);
+            if (m_SaveToGameToo && !g_chartStatusIsError)   //エディター側の保存が成功した時だけ
+                CopyChartToGame(filename);
         }
         ImGui::SameLine();
         if (ImGui::Button("Load", ImVec2(90, 0)))
@@ -2132,7 +2141,9 @@ void Game::Render()
         ImGui::Begin("Note Hierarchy", nullptr,
             ImGuiWindowFlags_NoMove |
             ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoCollapse);
+            ImGuiWindowFlags_NoCollapse |
+            ImGuiWindowFlags_NoBringToFrontOnFocus |
+            ImGuiWindowFlags_NoFocusOnAppearing);
 
         ImGui::Text("Notes: %d", (int)notes.size());
         ImGui::Separator();
@@ -2841,7 +2852,9 @@ void Game::Render()
         ImGui::SetNextWindowSize(ImVec2(screenW, bottomH));
         ImGui::Begin("BottomBar", nullptr,
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
+            ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar |
+            ImGuiWindowFlags_NoBringToFrontOnFocus |
+            ImGuiWindowFlags_NoFocusOnAppearing);
 
         // 再生 / 一時停止ボタン
         if (ImGui::Button("Play/Pause", ImVec2(100, 0)))
@@ -2938,6 +2951,70 @@ void Game::Render()
         ImGui::End();
     }
 
+    {
+        //グリッドについて
+        ImGui::SetNextWindowPos(ImVec2(400.0f, 80.0f), ImGuiCond_FirstUseEver);	// 最初に開いたときだけこの位置
+        ImGui::SetNextWindowSize(ImVec2(320.0f, 0.0f), ImGuiCond_FirstUseEver);	// 高さ0＝中身に合わせる
+        if (ImGui::Begin("Grid Tools"))
+        {
+            //グリッド
+            ImGui::InputFloat("Offset(sec)", &m_BaseOffset, 0.001f, 0.01f, "%.3f"); //最初の拍の位置
+            ImGui::Checkbox("Grid?", &m_SnapEnabled);
+            {
+                //一拍を何分割するか（4=16分、3=3連符、8=32分…)
+                const int divs[] = { 1,2,3,4,6,8,12,16 };
+                const char* names[] = { "1/4", "1/8", "1/12 (3)", "1/16", "1/24 (3)", "1/32", "1/48", "1/64" };
+                int current = 3;
+                for (int i = 0; i < 8; i++)
+                {
+                    if (divs[i] == m_EditorSnapDivision)
+                    {
+                        current = i;
+                    }
+                }
+                if (ImGui::Combo("Grid", &current, names, 8)) m_EditorSnapDivision = divs[current];
+            }
+
+            //今開いている譜面をグリッドに合わせるか
+            static int s_offGrid = 0, s_unsure = 0;
+            static bool s_checked = false;
+            float unit = GridUnit();
+
+            if (ImGui::Button("Check Grid"))
+            {
+                s_offGrid = 0;
+                s_unsure = 0;
+                for (const auto& n : notes)
+                {
+                    float t = (n.note == LONGNOTE) ? n.arrivalTime : n.time;
+                    float d = fabsf(t - SnapTime(t));                   //SnapTime(t)一番近いグリッドの時間
+                    if (d > 0.001f) s_offGrid++;                        //グリッドから外れている
+                    if (unit > 0.0f && d > unit * 0.35f) s_unsure++;    //マスの真ん中あたり。どっちに寄せるか怪しい時
+                }
+                s_checked = true;
+            }
+            if(s_checked)
+                ImGui::Text("off grid: %d / %d   (unsure: %d)", s_offGrid, (int)notes.size(), s_unsure);
+
+            if (ImGui::Button("Snap All Notes"))
+            {
+                m_NotesBeforeSnap = notes;  //元に戻せるように
+                m_HasSnapBackUp = true;
+                for (auto& n : notes) SnapNoteToGrid(n);
+                std::sort(notes.begin(), notes.end(),
+                    [](const Note& a, const Note& b) { return a.time < b.time; });
+                s_checked = false;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Undo Snap") && m_HasSnapBackUp)
+            {
+                notes = m_NotesBeforeSnap;
+                m_HasSnapBackUp = false;
+            }
+        }
+        ImGui::End();
+    }
+
     m_deviceResources->PIXEndEvent();
 
     // ImGui の描画データを DX11 に渡して実際に描く
@@ -2945,6 +3022,32 @@ void Game::Render()
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
     m_deviceResources->Present(); // バックバッファを画面に表示
+}
+
+//ノーツ一つの判定時刻をグリッドへ寄せる(到達を優先し、足りなかったら出現を早める)
+void Game::SnapNoteToGrid(Note& n)
+{
+    float unit = GridUnit();
+    if (unit <= 0.0f) return;
+
+    if (n.note == LONGNOTE)
+    {
+        float hold = n.time - n.arrivalTime;
+        n.arrivalTime = SnapTime(n.arrivalTime);
+        n.time = n.arrivalTime + std::max(std::round(hold / unit) * unit, unit);    //長さもマス単位に調整
+    }
+    else
+    {
+        n.time = SnapTime(n.time);
+        n.arrivalTime = n.time;
+    }
+
+    if (n.spawnTime > n.arrivalTime - g_minTravelTime)
+        n.spawnTime = std::max(0.0f, n.arrivalTime - g_minTravelTime);
+
+    //判定位置も新しい到達時刻の判定円の位置に合わせなおす
+    if (n.note != FLICK_RIGHT && n.note != FLICK_LEFT && n.lane >= 0 && n.lane < (int)judggeCircles.size())
+        n.judgePos = judggeCircles[n.lane].GetPosition(n.arrivalTime);
 }
 
 // ─────────────────────────────────────────────
@@ -3038,6 +3141,7 @@ void Game::SaveChart(std::string name)
     // メタ情報
     file << "\"meta\":{"
         << "\"bpm\":" << bpm << ","
+        << "\"offset\":" << m_BaseOffset << ","
         << "\"totalBeat\":" << totalBeat << ","
         << "\"audioFile\":\"" << m_AudioFileName << "\","
 		<< "\"totalNotes\":" << notes.size()
@@ -3365,6 +3469,7 @@ void Game::LoadChart(std::string name)
                 });
         }
     }
+    if (j["meta"].contains("offset")) m_BaseOffset = j["meta"]["offset"].get<float>();
 
     // ロード後の状態リセット
     sound.Stop(SOUND_LABEL_BGM001);
@@ -3386,6 +3491,51 @@ void Game::LoadChart(std::string name)
     OutputDebugStringA(("[LoadChart]" + g_chartStatusMessage + "\n").c_str());
 }
 
+//エディターで保存した譜面を直接本環境に保存
+//また既存曲をこっちで編集したら本環境も上書き
+void Game::CopyChartToGame(const std::string& name)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+
+    if (!fs::exists(kGameRoot, ec))
+    {
+        g_chartStatusMessage += "  / Game copy failed: game folder not found";
+        g_chartStatusIsError = true;
+        return;
+    }
+    //譜面
+    fs::path src = fs::path("charts") / (name + ".json");
+    fs::path dstDir = kGameRoot / "charts";
+    fs::path dst = dstDir / (name + ".json");
+    fs::create_directories(dstDir, ec);
+    // 本環境の譜面を上書きする前に、1つ前の版を .bak として残しておく（念のため）
+    if (fs::exists(dst, ec))
+        fs::copy_file(dst, fs::path(dst).replace_extension(".json.bak"), fs::copy_options::overwrite_existing, ec);
+
+    fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+    if (ec)
+    {
+        g_chartStatusMessage += "  / Game copy failed: " + ec.message();
+        g_chartStatusIsError = true;
+        return;
+    }
+
+    //曲（本環境にない時だけ）
+    if (!m_AudioFileName.empty())
+    {
+        fs::path audioSrc = fs::path("asset/bgm") / m_AudioFileName;
+        fs::path audioDst = kGameRoot / "assets" / "bgm" / m_AudioFileName;
+        if (!fs::exists(audioDst, ec) && fs::exists(audioSrc, ec))
+        {
+            fs::create_directories(audioDst.parent_path(), ec);
+            fs::copy_file(audioSrc, audioDst, ec);
+        }
+    }
+
+    g_chartStatusMessage += "  / also saved to game";
+}
+
 void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float regionH)
 {
     ImGui::SetNextWindowPos(ImVec2(regionX, regionY));
@@ -3393,7 +3543,9 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
     ImGui::Begin("NoteEditor", nullptr,
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar |
-        ImGuiWindowFlags_NoScrollWithMouse);
+        ImGuiWindowFlags_NoScrollWithMouse|
+        ImGuiWindowFlags_NoBringToFrontOnFocus|
+        ImGuiWindowFlags_NoFocusOnAppearing);
 
     ImDrawList* draw = ImGui::GetWindowDrawList();
     ImVec2 origin = ImGui::GetCursorScreenPos();
@@ -3446,26 +3598,34 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
     {
         float topTime = YToTime(origin.y);
         float bottomTime = YToTime(judgeY);
-        int beatStart = (int)std::floor(std::min(topTime, bottomTime) / secondsPerBeat) - 1;
-        int beatEnd = (int)std::ceil(std::max(topTime, bottomTime) / secondsPerBeat) + 1;
+        float tMin = std::min(topTime, bottomTime);
+        float tMax = std::max(topTime, bottomTime);
+        int beatStart = (int)std::floor((tMin - m_BaseOffset) / secondsPerBeat) - 1;
+        int beatEnd = (int)std::ceil((tMax - m_BaseOffset) / secondsPerBeat) + 1;
 
         ImGui::SetWindowFontScale(0.7f);
         for (int b = beatStart; b <= beatEnd; b++)
         {
             for (int sub = 0; sub < m_EditorSnapDivision; sub++)
             {
-                float t = (b + (float)sub / m_EditorSnapDivision) * secondsPerBeat;
+                float t = m_BaseOffset + (b + (float)sub / m_EditorSnapDivision) * secondsPerBeat;
                 if (t < 0.0f) continue;
                 float y = TimeToY(t);
                 if (y < origin.y - 20.0f || y > judgeY + 20.0f) continue;
-                bool isMainBeat = (sub == 0);
-                ImU32 col = isMainBeat ? IM_COL32(110, 110, 130, 180) : IM_COL32(50, 50, 60, 110);
-                draw->AddLine(ImVec2(origin.x, y), ImVec2(origin.x + regionW, y), col, isMainBeat ? 1.3f : 0.8f);
-                if (isMainBeat)
+                bool isBeat = (sub == 0);
+                bool isMeasure = isBeat && (((b % beatsPerMeasure) + beatsPerMeasure) % beatsPerMeasure == 0);
+                ImU32 col = isMeasure ? IM_COL32(200, 200, 230, 230)
+                    : isBeat ? IM_COL32(110, 110, 130, 180)
+                    : IM_COL32(50, 50, 60, 110);
+                float thick = isMeasure ? 2.0f : (isBeat ? 1.2f : 0.8f);
+                draw->AddLine(ImVec2(origin.x, y), ImVec2(origin.x + regionW, y), col, thick);
+
+                draw->AddLine(ImVec2(origin.x, y), ImVec2(origin.x + regionW, y), col, isBeat ? 1.3f : 0.8f);
+                if (isMeasure)
                 {
                     char label[16];
-                    sprintf_s(label, "%.2fs", t);
-                    draw->AddText(ImVec2(origin.x + 2.0f, y - 11.0f), IM_COL32(150, 150, 170, 200), label);
+                    sprintf_s(label, "%d", b / beatsPerMeasure + 1);    //小節番号
+                    draw->AddText(ImVec2(origin.x + 2.0f, y - 11.0f), IM_COL32(200, 200, 230, 230), label);
                 }
             }
         }
@@ -3584,6 +3744,16 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
     ImGui::InvisibleButton("editor_canvas_bg", ImVec2(regionW, regionH));
     bool canvasHovered = ImGui::IsItemHovered();
     ImVec2 mousePos = ImGui::GetMousePos();
+
+    //マウスの下に吸着先のしるしを出す
+    if (canvasHovered && m_DraggingNoteIndex == -1 && mousePos.y <= judgeY)
+    {
+        float t = SnapTime(YToTime(mousePos.y));
+        ImVec2 p(LaneColX(XToLane(mousePos.x)), TimeToY(t));
+        draw->AddRect(ImVec2(p.x - laneW * 0.45f, p.y - 4.0f), ImVec2(p.x + laneW * 0.45f, p.y + 4.0f),
+            IM_COL32(255, 255, 255, 140), 2.0f, 0, 1.5f);
+    }
+
     bool anyNoteHandleActivatedThisFrame = false;
 
     // ── 既存ノーツ：出現点→到達点の線 ──
@@ -3716,7 +3886,7 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
             float apx = mousePos.x - a.x;
             float apy = mousePos.y - a.y;
 
-            float lengthSq = abx + aby * aby;
+            float lengthSq = abx * abx + aby * aby;
             float t = (lengthSq > 0.00001f)
                 ? (apx * abx + apy * aby) / lengthSq
                 : 0.0f;
@@ -3754,14 +3924,15 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
         ImGui::IsMouseDragging(ImGuiMouseButton_Left))
     {
         auto& n = notes[m_DraggingNoteIndex];
-        float newTime = YToTime(mousePos.y);
+        float newTime = SnapTime(YToTime(mousePos.y));
         int newLane = XToLane(mousePos.x);
         if (m_DragHandle == DragHandle::Whole)
         {
             //開始時のノーツから舞フレーム計算
             Note moved = m_DragOriginalNote;
 
-            float deltaTime = newTime - m_DragStartMouseTime;
+            float snappedArrival = SnapTime(m_DragOriginalNote.arrivalTime + (YToTime(mousePos.y) - m_DragStartMouseTime));
+            float deltaTime = snappedArrival - m_DragOriginalNote.arrivalTime;
             deltaTime = std::max(deltaTime, -m_DragOriginalNote.spawnTime);
 
             moved.spawnTime = m_DragOriginalNote.spawnTime + deltaTime;
@@ -3789,26 +3960,27 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
         }
         else if (m_DragHandle == DragHandle::Spawn)
         {
-            n.spawnTime = newTime;
+            n.spawnTime = std::min(newTime, n.arrivalTime - g_minTravelTime);
+            if (n.spawnTime < 0.0f) n.spawnTime = 0.0f;
             n.spawnPos.x = LaneWorldX(newLane);
-            if (n.arrivalTime <= n.spawnTime) n.arrivalTime = n.spawnTime + g_minTravelTime;
         }
         else if (m_DragHandle == DragHandle::Arrival)
         {
             n.lane = newLane;
-            n.judgePos = judggeCircles[newLane].GetPosition(n.arrivalTime);
-
+            n.judgePos = judggeCircles[newLane].GetPosition(newTime);
             if (n.note == LONGNOTE)
             {
                 float holdDur = n.time - n.arrivalTime;
-                n.arrivalTime = std::max(newTime, n.spawnTime + g_minTravelTime);
-                n.time = n.arrivalTime + std::max(holdDur, 0.05f);
+                n.arrivalTime = newTime;
+                n.time = n.arrivalTime + std::max(holdDur, GridUnit());
             }
             else
             {
-                n.time = std::max(newTime, n.spawnTime + g_minTravelTime);
-                n.arrivalTime = n.time;
+                n.time = newTime;
+                n.arrivalTime = newTime;
             }
+            if (n.spawnTime > n.arrivalTime - g_minTravelTime)
+                n.spawnTime = std::max(0.0f, n.arrivalTime - g_minTravelTime);
         }
         else if (m_DragHandle == DragHandle::End)
         {
@@ -3827,7 +3999,7 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
         ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
         int clickLane = XToLane(mousePos.x);
-        float clickTime = YToTime(mousePos.y);
+        float clickTime = SnapTime(YToTime(mousePos.y));
         if (clickTime < 0.0f) clickTime = 0.0f;
 
         if (m_EditorState == EditorState::PLACING_SPAWN)
@@ -3842,7 +4014,9 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
         }
         else if (m_EditorState == EditorState::PLACING_JUDGE)
         {
-            float arriveT = std::max(clickTime, m_TempNote.spawnTime + g_minTravelTime);
+            float arriveT = clickTime;  //到達はクリックしたグリッドのまま
+            if (m_TempNote.spawnTime > arriveT - g_minTravelTime)
+                m_TempNote.spawnTime = std::max(0.0f, arriveT - g_minTravelTime);
 
             const int targetLane = m_TempNote.lane; //最初に設定したところ
             m_TempNote.judgePos = judggeCircles[targetLane].GetPosition(arriveT);
@@ -3854,8 +4028,7 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
             if (m_TempNote.note == LONGNOTE)
             {
                 m_TempNote.arrivalTime = arriveT;
-                m_TempNote.time =
-                    arriveT + std::max(m_TempNote.holdDuration, 0.05f);
+                m_TempNote.time = arriveT + std::max(SnapTime(m_TempNote.holdDuration + m_BaseOffset) - m_BaseOffset, GridUnit());
             }
             else
             {
@@ -4338,33 +4511,21 @@ void Game::GetDefaultSize(int& width, int& height) const noexcept
     height = 1080;
 }
 
-// DrawThickBeam : from→to を結ぶ、太さ指定可能なビームをクワッドで描画
-// カメラ方向を基準に垂直な面を作ることで、常にカメラ側を向く
-//void Game::DrawThickBeam(const DirectX::SimpleMath::Vector3& from, const DirectX::SimpleMath::Vector3& to, float thickness, DirectX::XMVECTORF32 color)
-//{
-//	Vector3 dir = to - from;
-//    float len = dir.Length();
-//	if (len < 0.01f) return; // 長さがほぼゼロなら描画しない
-//	dir.Normalize();
-//
-//	Vector3 toCam = m_camPos - from;
-//	Vector3 side = dir.Cross(toCam);    // ビーム方向とカメラ方向の外積で垂直ベクトルを求める
-//	if (side.LengthSquared() < 0.0001f) side = Vector3::Up; // 外積がほぼゼロなら上方向を代用
-//	side.Normalize();
-//	side *= thickness * 0.5f;   // ビームの半分の厚さ
-//
-//	Vector3 v0 = from - side; // クワッドの4頂点
-//	Vector3 v1 = from + side;
-//	Vector3 v2 = to + side;
-//	Vector3 v3 = to - side;
-//
-//	m_primitiveBatch->DrawQuad( // 4頂点のクワッドを描画
-//        VertexPositionColor(v0, color),
-//        VertexPositionColor(v1, color),
-//        VertexPositionColor(v2, color),
-//        VertexPositionColor(v3, color)
-//	);
-//}
+float Game::GridUnit() const
+{
+    if (bpm <= 0.0f || m_EditorSnapDivision <= 0) return 0.0f;
+    return (60.0f / bpm) / m_EditorSnapDivision;
+}
+
+//時刻ー＞一番近いグリッドの時刻。曲の最初の拍　m_BaseOffsetを基準とす
+float Game::SnapTime(float t) const
+{
+    float unit = GridUnit();
+    if (!m_SnapEnabled || unit <= 0.0f) return t;
+    float s = m_BaseOffset + std::round((t - m_BaseOffset) / unit) * unit;
+    if (s < 0.0f) s += unit;    //0より前にはしない
+    return s;
+}
 
 void Game::DrawThickBeam(const DirectX::SimpleMath::Vector3& from, const DirectX::SimpleMath::Vector3& to, float thicknessFrom, float thicknessTo, DirectX::XMVECTORF32 coreColor, DirectX::XMVECTORF32 glowColor)
 {

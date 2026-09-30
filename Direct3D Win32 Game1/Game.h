@@ -201,6 +201,7 @@ public:
     void OnWindowSizeChanged(int width, int height);
     void SaveChart(std::string name);
     void LoadChart(std::string name);
+    void CopyChartToGame(const std::string& name);  //保存した譜面を本環境にコピーする
 
     void DrawNoteEditorView(float regionX, float regionY, float regionW, float regionH);
 
@@ -289,6 +290,10 @@ private:
     float m_EditorScrollTime = 0.0f;
     float m_EditorPxPerSec = 150.0f;
     float m_audioEnvelopeBucketsPerSec = 120.0f; //1秒あたりのサンプリング回数
+    float m_BaseOffset = 0.0f;      //曲の最初の拍が何秒か(グリッドの基準)
+
+    float GridUnit() const;     //グリッド1マスが何秒か
+    float SnapTime(float t) const;  //一番近いグリッドの時刻にする
 
     //判定円のドラッグ操作用
     bool m_DraggingJudgeCircle = false;
@@ -357,7 +362,7 @@ private:
     int great = 0;
     int good = 0;
     int miss = 0;
-    int bpm = 120;
+    float bpm = 120;
     int LongStartLane = 0;
     int selectedNoteIndex = -1;
 
@@ -374,6 +379,8 @@ private:
     bool isOutRange = false;
     bool m_prevLaneKeyDown[6] = { false, false, false, false, false, false };
     bool m_Placing2DArmed = false;
+    bool m_SnapEnabled = true;  //グリッドに吸着させるか否か
+    bool m_SaveToGameToo = true;    //本環境にも一緒に保存するかのbool
 
     BGMstate bgmstate = BGMstate::stop;
     GameMode m_GameMode = GameMode::Edit2D;
@@ -449,6 +456,10 @@ private:
 
     void Update(DX::StepTimer const& timer);
     void Render();
+
+    void SnapNoteToGrid(Note& n);
+    std::vector<Note> m_NotesBeforeSnap;    //一括スナップ前の控え　もとに戻せるように
+    bool m_HasSnapBackUp = false;
 
     void Clear();
 
