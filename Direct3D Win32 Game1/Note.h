@@ -10,6 +10,12 @@ enum NoteType
 	FLICK_LEFT,
 };
 
+struct LaneTurn
+{
+    float time = 0.0f;
+    int lane = 0;
+};
+
 struct Note
 {
 public:
@@ -36,6 +42,14 @@ public:
 
 
     std::vector<DirectX::SimpleMath::Vector3> controlPoints;
+    std::vector<LaneTurn> turns;    //ロング専用　曲がる点
+    //t秒の時点で線があるレーン
+    int LaneAt(float t) const
+    {
+        int ln = lane;
+        for (const auto& tr : turns) { if (t >= tr.time)ln = tr.lane; else break; }
+        return ln;
+    }
 
     Note();
     //Note(int lane, float t, NoteType note);
@@ -56,5 +70,6 @@ public:
         return (spawnTime < 0.0f) ? (time - 2.0f) : spawnTime;
     }
 };
+
 
 //NoteType currentNoteType = TAP;

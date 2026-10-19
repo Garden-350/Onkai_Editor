@@ -242,7 +242,56 @@ static DirectX::SimpleMath::Vector3 EvaluateLongNotePos(const Note& note, float 
 	return LerpVector3(note.spawnPos, note.judgePos, t);
 }
 
+namespace
+{
+    //曲がり点を調整：時刻順に並べ、範囲外と同じレーンへの曲がりを消す
+    void NormalizeTurns(Note& n)
+    {
+        std::sort(n.turns.begin(), n.turns.end(),
+            [](const LaneTurn& a, const LaneTurn& b) {return a.time < b.time; });
+        std::vector<LaneTurn>out;
+        int prevLane = n.lane;
+        for (const auto& tr : n.turns)
+        {
+            if (tr.time <= n.arrivalTime + 0.001f) continue;
+            if (tr.time >= n.time - 0.001f) continue;           // 終端より後も無効
+            if (tr.lane == prevLane) continue;                  // 同じレーンへ曲がっても意味がない
+            out.push_back(tr);
+            prevLane = tr.lane;
+        }
+        n.turns = out;
+    }
 
+    //t秒にlaneへ曲がる点を置く（同じ時刻にもうあればレーンだけ変える）
+    void SetTurn(Note& n, float t, int lane)
+    {
+        for (auto& tr : n.turns)
+            if (std::fabs(tr.time - t) < 0.001f) { tr.lane = lane; NormalizeTurns(n); return; }
+        LaneTurn tr;
+        tr.time = t;
+        tr.lane = lane;
+        n.turns.push_back(tr);
+        NormalizeTurns(n);
+    }
+    // t に一番近い曲がり点を消す
+    void RemoveNearestTurn(Note& n, float t)
+    {
+        if (n.turns.empty()) return;
+        size_t best = 0;
+        for (size_t i = 1; i < n.turns.size(); i++)
+            if (std::fabs(n.turns[i].time - t) < std::fabs(n.turns[best].time - t)) best = i;
+        n.turns.erase(n.turns.begin() + best);
+        NormalizeTurns(n);
+    }
+    //置けるか調べる。置けない場合は理由を返す。ただし不慮の場合は不明
+    const char* CheckTurn(const Note& n, float t, int lane)
+    {
+        if (t <= n.arrivalTime + 0.001f)    return "before arrival (below the square)";
+        if (t >= n.time - 0.001f)           return "after end (above the circle)";
+        if (n.LaneAt(t - 0.0005f) == lane)  return "same lane as the line";
+        return nullptr;
+    }
+}
 
 
 // ─────────────────────────────────────────────
@@ -498,24 +547,6 @@ void Game::Initialize(HWND window, int width, int height)
         OutputDebugStringW(L"[Game] Long_O_Model load failed\n");
         m_Long_O_Model.reset();
     }
-
-
-    // ※ 3Dモデルのロード情報（現在は未使用）
-    //struct Load3DInfo {
-    //    std::string filename;
-    //    std::string texdirectoryname;
-    //    Load3DInfo(std::string p1, std::string p2) {
-    //        filename = p1;
-    //        texdirectoryname = p2;
-    //    }
-    //};
-
-    //std::array<Load3DInfo, 1> g_loadmodel =
-    //{
-    //    Load3DInfo("asset/Model/Dai/Daiza.obj", "asset/Model"),
-    //};
-
-
 
     // ImGui 初期化
     IMGUI_CHECKVERSION();
@@ -1788,6 +1819,7 @@ void Game::Render()
 				float delta = n.spawnTime - prevSpawnTime; //変更量
 				n.arrivalTime += delta; //到達時刻も同じだけ変更
 				n.time += delta; //終了時刻も同じだけ変更
+                for (auto& tr : n.turns) tr.time += delta; //曲がり点も同じだけずらす
             }
 			ImGui::InputFloat("Arrival Time (sec)", &n.arrivalTime, 0.01f);
 			ImGui::InputFloat("End Time (sec)", &n.time, 0.01f);
@@ -1817,6 +1849,34 @@ void Game::Render()
 
 			ImGui::Text("Display: %.2f sec, Arrival: %.2f sec, End: %.2f sec", n.arrivalTime - n.GetSpawnTime());
 			ImGui::Text("Pass through: %.2f sec", n.time - n.arrivalTime);
+
+            if (n.note == LONGNOTE)
+            {
+                ImGui::SeparatorText("Turns (moving long)");
+                ImGui::TextDisabled("2D view: Shift+RightClick = add, Ctrl+RightClick = remove");
+                int removeIndex = -1;
+                bool tidy = false;
+                for (int k = 0; k < (int)n.turns.size(); k++)
+                {
+                    ImGui::PushID(k);
+                    ImGui::SetNextItemWidth(80.0f);
+                    ImGui::InputFloat("##time", &n.turns[k].time, 0.0f, 0.0f, "%.3f");
+                    if (ImGui::IsItemDeactivatedAfterEdit()) tidy = true;   // 入力し終わったら整える
+                    for (int L = 0; L < 6; L++)
+                    {
+                        ImGui::SameLine();
+                        bool sel = (n.turns[k].lane == L);
+                        if (sel) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(1.0f, 0.5f, 0.0f, 1.0f));
+                        if (ImGui::Button(keyNames[L], ImVec2(24, 0))) { n.turns[k].lane = L; tidy = true; }
+                        if (sel) ImGui::PopStyleColor();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("x")) removeIndex = k;
+                    ImGui::PopID();
+                }
+                if (removeIndex >= 0) { n.turns.erase(n.turns.begin() + removeIndex); tidy = true; }
+                if (tidy) NormalizeTurns(n);
+            }
 
             ImGui::SeparatorText("Edit Timeline");
 			float fromTime = n.GetSpawnTime();
@@ -3192,6 +3252,18 @@ void Game::SaveChart(std::string name)
             }
             file << "]";
         }
+        //移動するロングの曲がる点
+        if (!n.turns.empty())
+        {
+            file << ",\"turns\":[";
+            for (size_t k = 0; k < n.turns.size(); k++)
+            {
+                file << "{\"time\":" << n.turns[k].time
+                    << ",\"lane\":" << n.turns[k].lane << "}";
+                if (k != n.turns.size() - 1) file << ",";
+            }
+            file << "]";
+        }
         file << "}";
         if (i != notes.size() - 1) file << ",";
         file << "\n";
@@ -3407,6 +3479,18 @@ void Game::LoadChart(std::string name)
                     v.z = p["z"].get<float>();
                     note.controlPoints.emplace_back(v);
                 }
+            }
+            // 移動するロングの曲がり点
+            if (n.contains("turns"))
+            {
+                for (const auto& tr : n["turns"])
+                {
+                    LaneTurn t;
+                    t.time = tr["time"].get<float>();
+                    t.lane = tr["lane"].get<int>();
+                    note.turns.push_back(t);
+                }
+                NormalizeTurns(note);
             }
             notes.emplace_back(note);
         }
@@ -3795,9 +3879,26 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
 
         if (n.note == LONGNOTE)
         {
-            ImVec2 pEnd(pArrive.x, TimeToY(endT));
-            draw->AddRectFilled(ImVec2(pArrive.x - 8.0f, pEnd.y), ImVec2(pArrive.x + 8.0f, pArrive.y),
-                IM_COL32(120, 200, 255, 110));
+            //曲がり点で区切って区間ごとにそのレーンの列へ描く
+            ImU32 bodyCol = IM_COL32(120, 200, 255, 110);
+            ImU32 turnCol = IM_COL32(255, 210, 90, 255);
+            float segStart = arriveT;
+            int segLane = n.lane;
+            for (const auto& tr : n.turns)
+            {
+                float x = LaneColX(segLane);
+                draw->AddRectFilled(ImVec2(x - 8.0f, TimeToY(tr.time)), ImVec2(x + 8.0f, TimeToY(segStart)), bodyCol);
+                // 曲がる瞬間の横線と、曲がり点の印（黄色いひし形）
+                float y = TimeToY(tr.time);
+                float nx = LaneColX(tr.lane);
+                draw->AddLine(ImVec2(x, y), ImVec2(nx, y), turnCol, 3.0f);
+                draw->AddQuadFilled(ImVec2(nx, y - 6.0f), ImVec2(nx + 6.0f, y), ImVec2(nx, y + 6.0f), ImVec2(nx - 6.0f, y), turnCol);
+                segStart = tr.time;
+                segLane = tr.lane;
+            }
+            float lastX = LaneColX(segLane);
+            draw->AddRectFilled(ImVec2(lastX - 8.0f, TimeToY(endT)), ImVec2(lastX + 8.0f, TimeToY(segStart)), bodyCol);
+            ImVec2 pEnd(lastX, TimeToY(endT));
             draw->AddCircleFilled(pEnd, 6.0f, IM_COL32(120, 200, 255, 230));
 
             ImGui::PushID(i * 3 + 2);
@@ -3904,6 +4005,17 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
                 bestDistanceSq = distanceSq;
                 hitIndex = i;
             }
+
+            //ロングの胴体も選べるように
+            if (n.note == LONGNOTE)
+            {
+                float mt = YToTime(mousePos.y);
+                if (mt >= n.arrivalTime && mt <= n.time)
+                {
+                    float dx = mousePos.x - LaneColX(n.LaneAt(mt));
+                    if (dx * dx < bestDistanceSq) { bestDistanceSq = dx * dx; hitIndex = i; }
+                }
+            }
         }
         if (hitIndex >= 0)
         {
@@ -3955,6 +4067,12 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
             // ベジェ制御点があるノーツも一緒に横移動
             for (auto& point : moved.controlPoints)
                 point.x += xOffset;
+            //曲がり点も同じだけ時間と一緒にずらす
+            for (auto& tr : moved.turns)
+            {
+                tr.time += deltaTime;
+                tr.lane = std::clamp(tr.lane + laneOffset, 0, laneCount - 1);
+            }
 
             notes[m_DraggingNoteIndex] = moved;
         }
@@ -3971,6 +4089,8 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
             if (n.note == LONGNOTE)
             {
                 float holdDur = n.time - n.arrivalTime;
+                float shift = newTime - n.arrivalTime;
+                for (auto& tr : n.turns) tr.time += shift;
                 n.arrivalTime = newTime;
                 n.time = n.arrivalTime + std::max(holdDur, GridUnit());
             }
@@ -3990,6 +4110,8 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
 
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
     {
+        if (m_DraggingNoteIndex >= 0 && m_DraggingNoteIndex < (int)notes.size())
+            NormalizeTurns(notes[m_DraggingNoteIndex]);   // 終点を縮めて範囲外になった点などを短く
         m_DraggingNoteIndex = -1;
         m_DragHandle = DragHandle::None;
     }
@@ -4047,10 +4169,44 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
         }
     }
 
-    // ── 右クリックで削除／配置中断 ──
+    //Shiftを押している間曲がり点を置けるかをマウスのところにだす
+    if (canvasHovered && ImGui::GetIO().KeyShift)
+    {
+        bool longSel = selectedNoteIndex >= 0 && selectedNoteIndex < (int)notes.size() &&
+            notes[selectedNoteIndex].note == LONGNOTE;
+        if (!longSel)
+        {
+            ImGui::SetTooltip("Select a LONG note first\n(click its diagonal line or a handle)");
+        }
+        else
+        {
+            const Note& sn = notes[selectedNoteIndex];
+            float t = SnapTime(YToTime(mousePos.y));
+            int lane = XToLane(mousePos.x);
+            const char* why = CheckTurn(sn, t, lane);
+            ImVec2 p(LaneColX(lane), TimeToY(t));
+            ImU32 col = why ? IM_COL32(255, 80, 80, 230) : IM_COL32(255, 210, 90, 230);
+            draw->AddQuad(ImVec2(p.x, p.y - 8), ImVec2(p.x + 8, p.y), ImVec2(p.x, p.y + 8), ImVec2(p.x - 8, p.y), col, 2.0f);
+            ImGui::SetTooltip("%.3fs  lane %s\n%s", t, laneNames[lane], why ? why : "RightClick = add turn");
+        }
+    }
+
+    // ── 右クリック：Shift で曲がり点を置く / Ctrl で消す / 何もなしなら今まで通り ──
     if (canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
     {
-        if (m_EditorState == EditorState::PLACING_SPAWN || m_EditorState == EditorState::PLACING_JUDGE)
+        const ImGuiIO& io = ImGui::GetIO();
+        bool editTurn = (io.KeyShift || io.KeyCtrl) &&
+            selectedNoteIndex >= 0 && selectedNoteIndex < (int)notes.size() &&
+            notes[selectedNoteIndex].note == LONGNOTE;
+
+        if (editTurn)
+        {
+            Note& n = notes[selectedNoteIndex];
+            float t = SnapTime(YToTime(mousePos.y));
+            if (io.KeyShift) SetTurn(n, t, XToLane(mousePos.x));
+            else             RemoveNearestTurn(n, t);
+        }
+        else if (m_EditorState == EditorState::PLACING_SPAWN || m_EditorState == EditorState::PLACING_JUDGE)
         {
             m_EditorState = EditorState::IDLE;
         }
