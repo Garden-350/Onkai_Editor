@@ -212,6 +212,11 @@ public:
 
     void UpdateCamera();
 
+    void StartPlayback();   //再生->停止
+    void PausePlayback();   //再生->一時停止
+    void ResumePlayback();  //一時停止->再開
+    void DropPassedNotes(); //今の位置より前のノーツを判定せずに外す
+
     void InitBeamScatter(HomingBeam& beam);
 
     bool NoteExit(int lane, float time);

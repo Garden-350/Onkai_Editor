@@ -4,6 +4,7 @@
 
 #include "pch.h"
 #include "Game.h"
+#include "PatternTool.h"
 #include "imgui.h"
 #include "sound.h"
 #include "imgui_impl_win32.h"
@@ -30,6 +31,19 @@ std::vector<Note>  notes;          // 現在配置されているノーツ一覧
 std::vector<Beams> beams;          // ビームオブジェクト一覧
 
 std::vector<Note>  originalNotes;  // 再生前のノーツ状態を退避しておくバックアップ
+bool g_NotesConsumed = false;
+static bool  g_QuickPlace = true;		// 1クリック配置
+static float g_QuickHoldBeats = 1.0f;	// 1クリックでロングを置く時の長さ（拍）
+static PatternTool::Params g_Pat;				// 今選んでいるパターン
+static std::vector<Note>   g_Clip;				// コピーしたノーツ
+static float               g_ClipT0 = 0.0f;		// コピーした範囲の頭（秒）
+static float               g_ClipBeats = 4.0f;	// コピーした範囲の長さ（拍）
+static bool                g_PasteMirror = false;
+static std::vector<Note>   g_PatUndo;			// 置く・貼る前の状態（1回分の取り消し用）
+static bool                g_HasPatUndo = false;
+enum GhostMode { kGhostNone = 0, kGhostStamp, kGhostPaste };
+static int                 g_GhostMode = kGhostNone;
+static bool                g_GhostFollowLane = true;	// ゴーストの Lane A をマウスのレーンに合わせる
 static char filename[64] = "chartname"; // セーブ／ロード時のファイル名バッファ
 static std::string g_chartStatusMessage;    //save/loadの結果メッセ
 static const std::filesystem::path kGameRoot = L"C:/Users/mawar/Desktop/3Dゲーム作成1";  //コピーする場所（今回は本環境に直接入れてます）
@@ -552,7 +566,7 @@ void Game::Initialize(HWND window, int width, int height)
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // キーボードナビゲーション有効
+    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // キーボードナビゲーション有効
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;  // ゲームパッドナビゲーション有効
 
     ImGui_ImplWin32_Init(window);
@@ -824,7 +838,7 @@ void Game::Update(DX::StepTimer const& timer)
         float denom = rayDir.Dot(camForward);
         if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
         {
-            m_PlacementHeight -= ImGui::GetIO().MouseWheel * 10.0f; // 感度は調整
+            m_PlacementHeight += ImGui::GetIO().MouseWheel * 0.02f; // 感度は調整
         }
         // y=-55 の水平面とレイの交点を計算
         constexpr float noteY = -55.0f;
@@ -962,6 +976,7 @@ void Game::Update(DX::StepTimer const& timer)
         {
             m_EditorState = EditorState::IDLE;
             selectedNoteIndex = -1;
+            g_GhostMode = kGhostNone;
         }
     }
 
@@ -987,26 +1002,9 @@ void Game::Update(DX::StepTimer const& timer)
     {
         switch (bgmstate)
         {
-        case BGMstate::stop:
-            // 再生開始：ノーツ状態を退避し、エディタ位置から BGM 再生
-            originalNotes = notes;
-            musicTime = editorBeat * (60.0f / bpm);
-            sound.SetPlayPositionSecondsDynamic(musicTime);
-            sound.PlayDynamic();
-            bgmstate = BGMstate::play;
-            break;
-
-        case BGMstate::play:
-            sound.PauseDynamic();
-            bgmstate = BGMstate::pause;
-            break;
-
-        case BGMstate::pause:
-            // 再開：BGM の再生を再スタート
-            sound.ResumeDynamic();
-            bgmstate = BGMstate::play;
-            if (mirrorMode == true) mirrorMode = !mirrorMode;
-            break;
+        case BGMstate::stop:  StartPlayback();  break;
+        case BGMstate::play:  PausePlayback();  break;
+        case BGMstate::pause: ResumePlayback(); break;
         }
     }
 
@@ -1186,6 +1184,7 @@ void Game::Update(DX::StepTimer const& timer)
             editorBeat = 0.0f;
             //ノーツとかも戻す
             notes = originalNotes;
+            g_NotesConsumed = false;
             success = 0;
             miss = 0;
             perfect = 0;
@@ -2921,31 +2920,26 @@ void Game::Render()
         {
             switch (bgmstate)
             {
-            case BGMstate::stop:
-                originalNotes = notes;
-                musicTime = editorBeat * (60.0f / bpm);
-                sound.SetPlayPositionSecondsDynamic(musicTime);
-                sound.PlayDynamic();
-                bgmstate = BGMstate::play;
-                break;
-            case BGMstate::play:
-                sound.PauseDynamic();
-                bgmstate = BGMstate::pause;
-                break;
-            case BGMstate::pause:
-                sound.ResumeDynamic();
-                bgmstate = BGMstate::play;
-                break;
+            case BGMstate::stop:  StartPlayback();  break;
+            case BGMstate::play:  PausePlayback();  break;
+            case BGMstate::pause: ResumePlayback(); break;
             }
         }
         ImGui::SameLine();
         // 先頭に戻るボタン
         if (ImGui::Button("BACK", ImVec2(80, 0)))
         {
+            // 再生で消えたノーツがある時だけ戻す（止めてから変えた値は消さない）
+            if (g_NotesConsumed)
+            {
+                notes = originalNotes;
+                g_NotesConsumed = false;
+            }
             sound.StopDynamic();
             musicTime = 0.0f;
             bgmstate = BGMstate::stop;
-            notes = originalNotes;
+            selectedNoteIndex = -1;
+            m_DraggingNoteIndex = -1;
             success = 0; miss = 0;
         }
 
@@ -3129,6 +3123,124 @@ void Game::Clear()
     auto const viewport = m_deviceResources->GetScreenViewport();
     context->RSSetViewports(1, &viewport);
 
+    {
+        // ── パターン（テンプレ）・範囲コピー ──
+        ImGui::SetNextWindowPos(ImVec2(400.0f, 330.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(340.0f, 0.0f), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Pattern Tools"))
+        {
+            static bool  s_Advance = true;			// STAMP / PASTE at cursor の後、判定ラインを先へ進める
+            static float s_CopyFromBeat = 0.0f;
+            static float s_CopyBeats = 4.0f;
+
+            PatternTool::Context ctx;
+            ctx.bpm = bpm;
+            ctx.offset = m_BaseOffset;
+            ctx.noteY = kNoteY;
+            ctx.flickSpawn = enemyPos;
+            ctx.judgePosAt = [&](int l, float t) { return Vector3(judggeCircles[l].GetPosition(t)); };
+            ctx.spawnX = [](int l) { return -(-240.0f + (540.0f / 6.0f) * l + (600.0f / 12.0f)); };
+
+            const bool playing = (bgmstate == BGMstate::play);
+            const float cursor = SnapTime(m_EditorScrollTime);
+            ImGui::Text("Cursor: beat %.2f  (%.3f s)", ctx.TimeToBeat(cursor), cursor);
+
+            ImGui::Checkbox("Quick place (1 click)", &g_QuickPlace);
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(80.0f);
+            ImGui::InputFloat("Long beats", &g_QuickHoldBeats, 0.0f, 0.0f, "%.2f");
+            if (g_QuickHoldBeats < 0.25f) g_QuickHoldBeats = 0.25f;
+
+            if (playing) ImGui::BeginDisabled();
+
+            // ── パターン ──
+            ImGui::SeparatorText("Pattern");
+            const char* kindNames[(int)PatternTool::Kind::Count];
+            for (int i = 0; i < (int)PatternTool::Kind::Count; i++) kindNames[i] = PatternTool::KindName((PatternTool::Kind)i);
+            int kind = (int)g_Pat.kind;
+            if (ImGui::Combo("Type", &kind, kindNames, (int)PatternTool::Kind::Count)) g_Pat.kind = (PatternTool::Kind)kind;
+
+            const char* laneNames6[] = { "S", "D", "F", "J", "K", "L" };
+            ImGui::Combo("Lane A", &g_Pat.laneA, laneNames6, 6);
+            ImGui::Combo("Lane B", &g_Pat.laneB, laneNames6, 6);
+
+            const float steps[] = { 1.0f, 0.5f, 1.0f / 3.0f, 0.25f, 1.0f / 6.0f };
+            const char* stepNames[] = { "1/4", "1/8", "1/12 (3)", "1/16", "1/24 (3)" };
+            int stepIdx = 1;
+            for (int i = 0; i < 5; i++) if (fabsf(steps[i] - g_Pat.stepBeats) < 0.001f) stepIdx = i;
+            if (ImGui::Combo("Step", &stepIdx, stepNames, 5)) g_Pat.stepBeats = steps[stepIdx];
+
+            ImGui::InputFloat("Length (beats)", &g_Pat.lengthBeats, 1.0f, 4.0f, "%.2f");
+            if (g_Pat.lengthBeats < g_Pat.stepBeats) g_Pat.lengthBeats = g_Pat.stepBeats;
+            ImGui::Checkbox("Mirror", &g_Pat.mirror);
+            ImGui::SameLine();
+            ImGui::Checkbox("Lane A = mouse", &g_GhostFollowLane);
+
+            // マウスで置く（ゴースト）
+            const bool ghostStamp = (g_GhostMode == kGhostStamp);
+            if (ghostStamp) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 1.0f, 1.0f));
+            if (ImGui::Button(ghostStamp ? "Placing... (RightClick = stop)" : "Place with mouse (ghost)", ImVec2(-1, 34)))
+                g_GhostMode = ghostStamp ? kGhostNone : kGhostStamp;
+            if (ghostStamp) ImGui::PopStyleColor();
+
+            if (ImGui::Button("STAMP at cursor"))
+            {
+                g_PatUndo = notes; g_HasPatUndo = true;
+                int n = PatternTool::Stamp(notes, g_Pat, cursor, ctx);
+                selectedNoteIndex = -1;
+                if (s_Advance) m_EditorScrollTime = cursor + g_Pat.lengthBeats * ctx.SecPerBeat();
+                g_chartStatusMessage = "Stamped " + std::to_string(n) + " notes";
+                g_chartStatusIsError = false;
+            }
+            ImGui::SameLine();
+            ImGui::Checkbox("Advance cursor", &s_Advance);
+
+            // ── 範囲コピー ──
+            ImGui::SeparatorText("Copy / Paste");
+            if (ImGui::Button("From = cursor")) s_CopyFromBeat = ctx.TimeToBeat(cursor);
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(90.0f);
+            ImGui::InputFloat("From beat", &s_CopyFromBeat, 0.0f, 0.0f, "%.2f");
+            ImGui::InputFloat("Beats", &s_CopyBeats, 1.0f, 4.0f, "%.2f");
+            if (ImGui::Button("Copy"))
+            {
+                g_ClipT0 = ctx.BeatToTime(s_CopyFromBeat);
+                g_ClipBeats = s_CopyBeats;
+                g_Clip = PatternTool::Copy(notes, g_ClipT0, ctx.BeatToTime(s_CopyFromBeat + s_CopyBeats));
+            }
+            ImGui::SameLine();
+            ImGui::Text("clip: %d notes", (int)g_Clip.size());
+            ImGui::Checkbox("Paste mirrored", &g_PasteMirror);
+
+            const bool ghostPaste = (g_GhostMode == kGhostPaste);
+            if (ghostPaste) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 1.0f, 1.0f));
+            if (ImGui::Button(ghostPaste ? "Pasting... (RightClick = stop)" : "Paste with mouse (ghost)", ImVec2(-1, 30)) && !g_Clip.empty())
+                g_GhostMode = ghostPaste ? kGhostNone : kGhostPaste;
+            if (ghostPaste) ImGui::PopStyleColor();
+
+            if (ImGui::Button("PASTE at cursor") && !g_Clip.empty())
+            {
+                g_PatUndo = notes; g_HasPatUndo = true;
+                int n = PatternTool::Paste(notes, g_Clip, g_ClipT0, cursor, g_PasteMirror, ctx);
+                selectedNoteIndex = -1;
+                if (s_Advance) m_EditorScrollTime = cursor + g_ClipBeats * ctx.SecPerBeat();
+                g_chartStatusMessage = "Pasted " + std::to_string(n) + " notes";
+                g_chartStatusIsError = false;
+            }
+
+            ImGui::Separator();
+            if (ImGui::Button("Undo last STAMP / PASTE") && g_HasPatUndo)
+            {
+                notes = g_PatUndo;
+                g_HasPatUndo = false;
+                selectedNoteIndex = -1;
+            }
+
+            if (playing) ImGui::EndDisabled();
+        }
+        ImGui::End();
+    }
+
     m_deviceResources->PIXEndEvent();
 }
 #pragma endregion
@@ -3179,6 +3291,7 @@ void Game::OnWindowSizeChanged(int width, int height)
 // ─────────────────────────────────────────────
 void Game::SaveChart(std::string name)
 {
+    if (bgmstate == BGMstate::play) PausePlayback();   //再生中に保存しても、消えたノーツが失われないように
     std::error_code ec;
     std::filesystem::create_directories("charts", ec);
     if (ec)
@@ -3636,10 +3749,12 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
     constexpr float kSpectrumW = 80.0f;
     float laneRegionW = regionW - kSpectrumW;
     const int laneCount = 6;
+    const float kNowRatio = 0.7f;   //NOWラインの高さ（上から 70%）。下の 30% が過去
+    float canvasBottom = origin.y + regionH;    //画面の一番下
     float laneW = laneRegionW / laneCount;
     float spectrumX0 = origin.x + laneRegionW;
     float spectrumX1 = origin.x + regionW;
-    float judgeY = origin.y + regionH - 40.0f;
+    float judgeY = origin.y + regionH * kNowRatio;
     const char* laneNames[] = { "S","D","F","J","K","L" };
 
     float secondsPerBeat = (bpm > 0) ? 60.0f / bpm : 0.5f;
@@ -3655,6 +3770,8 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
         if (m_EditorScrollTime < 0.0f) m_EditorScrollTime = 0.0f;
         nowTime = m_EditorScrollTime;
     }
+    // 再生中はスクロール位置を再生位置に合わせておく（止めた瞬間に元の位置へ飛ばないように）
+    if (bgmstate == BGMstate::play) m_EditorScrollTime = musicTime;
 
     auto TimeToY = [&](float t) { return judgeY - (t - nowTime) * m_EditorPxPerSec * highSpeed; };
     auto YToTime = [&](float y) { return nowTime + (judgeY - y) / (m_EditorPxPerSec * highSpeed); };
@@ -3670,18 +3787,18 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
 
     // ── 背景 ──
     draw->AddRectFilled(origin, ImVec2(origin.x + regionW, origin.y + regionH), IM_COL32(20, 22, 28, 255));
-
+    draw->AddRectFilled(ImVec2(origin.x, judgeY), ImVec2(origin.x + regionW, canvasBottom), IM_COL32(12, 13, 17, 255));
     // ── レーン区切り線 ──
     for (int i = 0; i <= laneCount; i++)
     {
         float x = origin.x + laneW * i;
-        draw->AddLine(ImVec2(x, origin.y), ImVec2(x, judgeY), IM_COL32(55, 55, 65, 130));
+        draw->AddLine(ImVec2(x, origin.y), ImVec2(x, canvasBottom), IM_COL32(55, 55, 65, 130));
     }
 
     // ── 拍グリッド ──
     {
         float topTime = YToTime(origin.y);
-        float bottomTime = YToTime(judgeY);
+        float bottomTime = YToTime(canvasBottom);
         float tMin = std::min(topTime, bottomTime);
         float tMax = std::max(topTime, bottomTime);
         int beatStart = (int)std::floor((tMin - m_BaseOffset) / secondsPerBeat) - 1;
@@ -3695,7 +3812,7 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
                 float t = m_BaseOffset + (b + (float)sub / m_EditorSnapDivision) * secondsPerBeat;
                 if (t < 0.0f) continue;
                 float y = TimeToY(t);
-                if (y < origin.y - 20.0f || y > judgeY + 20.0f) continue;
+                if (y < origin.y - 20.0f || y > canvasBottom + 20.0f) continue;
                 bool isBeat = (sub == 0);
                 bool isMeasure = isBeat && (((b % beatsPerMeasure) + beatsPerMeasure) % beatsPerMeasure == 0);
                 ImU32 col = isMeasure ? IM_COL32(200, 200, 230, 230)
@@ -3720,11 +3837,11 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
     {
         draw->AddRectFilled(
             ImVec2(spectrumX0, origin.y),
-            ImVec2(spectrumX1, judgeY),
+            ImVec2(spectrumX1, canvasBottom),
             IM_COL32(10, 10, 14, 255));
 
         float topTime = YToTime(origin.y);
-        float bottomTime = YToTime(judgeY);
+        float bottomTime = YToTime(canvasBottom);
         float minT = std::min(topTime, bottomTime);
         float maxT = std::max(topTime, bottomTime);
 
@@ -3768,7 +3885,7 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
             float t1 = t0 + bucketDuration;
             float y0 = TimeToY(t0);
             float y1 = TimeToY(t1);
-            if (y1 > origin.y - 2.0f && y0 < judgeY + 2.0f)
+            if (y1 > origin.y - 2.0f && y0 < canvasBottom + 2.0f)
             {
                 float level = m_audioEnvelope[i];
                 float w = 2.0f + barMaxWidth * level;
@@ -3792,7 +3909,7 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
     // ── レーンキー(下) ──
     for (int i = 0; i < laneCount; i++)
     {
-        ImVec2 c(LaneColX(i), judgeY + 20.0f);
+        ImVec2 c(LaneColX(i), canvasBottom - 18.0f);
         draw->AddCircleFilled(c, 14.0f, IM_COL32(40, 44, 54, 255));
         draw->AddCircle(c, 14.0f, IM_COL32(150, 160, 190, 220), 16, 1.5f);
         draw->AddText(ImVec2(c.x - 5.0f, c.y - 7.0f), IM_COL32(230, 230, 240, 255), laneNames[i]);
@@ -3830,7 +3947,7 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
     ImVec2 mousePos = ImGui::GetMousePos();
 
     //マウスの下に吸着先のしるしを出す
-    if (canvasHovered && m_DraggingNoteIndex == -1 && mousePos.y <= judgeY)
+    if (canvasHovered && m_DraggingNoteIndex == -1 && mousePos.y <= canvasBottom)
     {
         float t = SnapTime(YToTime(mousePos.y));
         ImVec2 p(LaneColX(XToLane(mousePos.x)), TimeToY(t));
@@ -3865,8 +3982,12 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
         ImVec2 pSpawn(LaneColX(spawnLane), TimeToY(spawnT));
         ImVec2 pArrive(LaneColX(arriveLane), TimeToY(arriveT));
 
-        if (pSpawn.y < origin.y - 60.0f && pArrive.y < origin.y - 60.0f) continue;
-        if (pSpawn.y > judgeY + 60.0f && pArrive.y > judgeY + 60.0f) continue;
+        // 画面に少しでも入っていれば描く（ロングは終点まで含めて判定する）
+        float topY = std::min(pSpawn.y, pArrive.y);          // 一番上（一番未来）の点
+        float bottomY = std::max(pSpawn.y, pArrive.y);       // 一番下（一番過去）の点
+        if (n.note == LONGNOTE) topY = std::min(topY, TimeToY(endT));   // ロングは終点が一番上
+        if (bottomY < origin.y - 60.0f) continue;            // 全部が画面より上（まだ先）
+        if (topY > canvasBottom + 60.0f) continue;           // 全部が画面より下（もう過ぎた）
 
         bool selected = (i == selectedNoteIndex);
         ImU32 lineCol = selected ? IM_COL32(255, 230, 120, 255) : IM_COL32(120, 200, 255, 200);
@@ -4116,15 +4237,124 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
         m_DragHandle = DragHandle::None;
     }
 
+    // ── ゴースト（Pattern Tools の「Place / Paste with mouse」中）──
+//   マウスの位置に、置かれる予定のノーツを半透明で出す。左クリックで確定、右クリックでやめる
+    bool ghostUsedLeft = false;
+    bool ghostUsedRight = false;
+    if (g_GhostMode != kGhostNone && bgmstate != BGMstate::play && canvasHovered && mousePos.y <= canvasBottom)
+    {
+        PatternTool::Context ctx;
+        ctx.bpm = bpm;
+        ctx.offset = m_BaseOffset;
+        ctx.noteY = kNoteY;
+        ctx.flickSpawn = enemyPos;
+        ctx.judgePosAt = [&](int l, float t) { return Vector3(judggeCircles[l].GetPosition(t)); };
+        ctx.spawnX = LaneWorldX;
+        const float spb = ctx.SecPerBeat();
+
+        const float start = std::max(0.0f, SnapTime(YToTime(mousePos.y)));	// マウスの所から置く
+        std::vector<Note> ghost;
+        float lengthBeats = 0.0f;
+        const char* title = "";
+        if (g_GhostMode == kGhostStamp)
+        {
+            PatternTool::Params p = g_Pat;
+            if (g_GhostFollowLane)	// Lane A をマウスのレーンへ。A と B の間隔はそのまま（はみ出す分は端で止める）
+            {
+                int d = XToLane(mousePos.x) - p.laneA;
+                p.laneA = std::clamp(p.laneA + d, 0, 5);
+                p.laneB = std::clamp(p.laneB + d, 0, 5);
+            }
+            PatternTool::Stamp(ghost, p, start, ctx);		// 空の入れ物に置いてみる＝プレビュー
+            lengthBeats = p.lengthBeats;
+            title = PatternTool::KindName(p.kind);
+        }
+        else
+        {
+            PatternTool::Paste(ghost, g_Clip, g_ClipT0, start, g_PasteMirror, ctx);
+            lengthBeats = g_ClipBeats;
+            title = g_PasteMirror ? "Paste (mirrored)" : "Paste";
+        }
+
+        // 置かれる範囲（帯）。ロングが長ければそこまで伸ばす
+        float endT = start + lengthBeats * spb;
+        for (const auto& n : ghost) endT = std::max(endT, n.time);
+        ImVec2 bandMin(origin.x, TimeToY(endT));
+        ImVec2 bandMax(origin.x + laneW * laneCount, TimeToY(start));
+        draw->AddRectFilled(bandMin, bandMax, IM_COL32(120, 200, 255, 28));
+        draw->AddLine(ImVec2(bandMin.x, bandMax.y), bandMax, IM_COL32(120, 200, 255, 220), 2.0f);	// 始まり
+        draw->AddLine(bandMin, ImVec2(bandMax.x, bandMin.y), IM_COL32(120, 200, 255, 120), 1.0f);	// 終わり
+
+        // ノーツ（すでにある所は赤＝飛ばされる）
+        int clash = 0;
+        const float hw = laneW * 0.38f;
+        for (const auto& n : ghost)
+        {
+            const float head = PatternTool::HeadTime(n);
+            const bool isClash = PatternTool::Exists(notes, n.lane, head);
+            if (isClash) clash++;
+            ImU32 fill = isClash ? IM_COL32(255, 80, 80, 70) : IM_COL32(120, 220, 255, 110);
+            ImU32 edge = isClash ? IM_COL32(255, 90, 90, 220) : IM_COL32(200, 245, 255, 230);
+            float x = LaneColX(n.lane);
+            float y = TimeToY(head);
+            if (n.note == LONGNOTE)
+                draw->AddRectFilled(ImVec2(x - hw * 0.35f, TimeToY(n.time)), ImVec2(x + hw * 0.35f, y), fill, 3.0f);
+            draw->AddRectFilled(ImVec2(x - hw, y - 5.0f), ImVec2(x + hw, y + 5.0f), fill, 3.0f);
+            draw->AddRect(ImVec2(x - hw, y - 5.0f), ImVec2(x + hw, y + 5.0f), edge, 3.0f, 0, 1.5f);
+        }
+
+        ImGui::SetTooltip("%s\nbeat %.2f - %.2f  (%.2f beats)\nplace %d notes%s\nLeftClick = place / RightClick = stop",
+            title, ctx.TimeToBeat(start), ctx.TimeToBeat(endT), (endT - start) / spb,
+            (int)ghost.size() - clash, clash > 0 ? "  (red = already there, skipped)" : "");
+
+        // 左クリック：確定（モードは続くので、続けて別の場所にも置ける）
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !anyNoteHandleActivatedThisFrame)
+        {
+            g_PatUndo = notes; g_HasPatUndo = true;
+            for (const auto& n : ghost)
+                if (!PatternTool::Exists(notes, n.lane, PatternTool::HeadTime(n))) notes.push_back(n);
+            PatternTool::SortNotes(notes);
+            selectedNoteIndex = -1;
+            ghostUsedLeft = true;
+        }
+        // 右クリック：やめる
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        {
+            g_GhostMode = kGhostNone;
+            ghostUsedRight = true;
+        }
+    }
+
     // ── 2クリック配置：1回目=出現、2回目=到達 ──
     if (canvasHovered && !anyNoteHandleActivatedThisFrame && m_DraggingNoteIndex == -1 &&
+        g_GhostMode == kGhostNone && !ghostUsedLeft &&
         ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
         int clickLane = XToLane(mousePos.x);
         float clickTime = SnapTime(YToTime(mousePos.y));
         if (clickTime < 0.0f) clickTime = 0.0f;
 
-        if (m_EditorState == EditorState::PLACING_SPAWN)
+        // ── 1クリック配置（Pattern Tools の Quick place が ON の時）──
+        //   空いている所をクリック → 今選んでいる種類のノーツをそのレーン・時刻に置く
+        if (g_QuickPlace && m_EditorState == EditorState::IDLE && bgmstate != BGMstate::play)
+        {
+            PatternTool::Context ctx;
+            ctx.bpm = bpm;
+            ctx.offset = m_BaseOffset;
+            ctx.noteY = kNoteY;
+            ctx.flickSpawn = enemyPos;
+            ctx.judgePosAt = [&](int l, float t) { return Vector3(judggeCircles[l].GetPosition(t)); };
+            ctx.spawnX = LaneWorldX;
+
+            if (!PatternTool::Exists(notes, clickLane, clickTime))
+            {
+                float hold = g_QuickHoldBeats * ctx.SecPerBeat();
+                notes.push_back(PatternTool::MakeNote(currentNoteType, clickLane, clickTime, hold, m_TempNote.flickLaneTo, ctx));
+                PatternTool::SortNotes(notes);
+            }
+            selectedNoteIndex = -1;
+        }
+        else if (m_EditorState == EditorState::PLACING_SPAWN)
         {
             m_TempNote.spawnTime = clickTime;
             m_TempNote.spawnPos = { LaneWorldX(clickLane), kNoteY, 1000.0f };
@@ -4192,7 +4422,7 @@ void Game::DrawNoteEditorView(float regionX, float regionY, float regionW, float
     }
 
     // ── 右クリック：Shift で曲がり点を置く / Ctrl で消す / 何もなしなら今まで通り ──
-    if (canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+    if (canvasHovered && !ghostUsedRight && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
     {
         const ImGuiIO& io = ImGui::GetIO();
         bool editTurn = (io.KeyShift || io.KeyCtrl) &&
@@ -4611,6 +4841,59 @@ void Game::UpdateCamera()
         break;
     }
 
+    }
+}
+
+//停止->再生
+void Game::StartPlayback()
+{
+    originalNotes = notes;
+    g_NotesConsumed = true;		// ここから先、notes は判定で減っていく
+    musicTime = editorBeat * (60.0f / bpm);
+    DropPassedNotes();  //途中から再生しても前のノーツをミスしない
+    sound.SetPlayPositionSecondsDynamic(musicTime);
+    sound.PlayDynamic();
+    bgmstate = BGMstate::play;
+}
+
+//再生->一時停止
+void Game::PausePlayback()
+{
+    sound.PauseDynamic();
+    bgmstate = BGMstate::pause;
+    notes = originalNotes;  //判定でeraseされたノーツを復活
+    selectedNoteIndex = -1; //ノーツの並びが変わるので選択を外す
+    g_NotesConsumed = false;
+    m_DraggingNoteIndex = -1;
+    m_EditorScrollTime = musicTime; //止めた位置から
+}
+
+//一時停止->再開
+void Game::ResumePlayback()
+{
+    originalNotes = notes;  //止めている間に編集した文も含めて改めて退避
+    g_NotesConsumed = false;
+    DropPassedNotes();  //再開位置より前のノーツはミスにしない
+    sound.ResumeDynamic();
+    bgmstate = BGMstate::play;
+    if (mirrorMode) mirrorMode = false;
+}
+
+//今の位置より前のノーツを判定せずに外す
+void Game::DropPassedNotes()
+{
+    for (int i = (int)notes.size() - 1; i >= 0; i--)
+    {
+        Note& n = notes[i];
+        if (n.note == LONGNOTE)
+        {
+            if (n.time <= musicTime) { notes.erase(notes.begin() + i); continue; }   // もう終わったロング
+            if (n.arrivalTime < musicTime) n.longFailed = true;   // 途中から始まるロングは判定しない（表示は残す）
+        }
+        else if (n.time < musicTime)
+        {
+            notes.erase(notes.begin() + i);
+        }
     }
 }
 

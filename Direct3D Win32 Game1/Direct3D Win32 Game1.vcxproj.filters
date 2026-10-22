@@ -55,6 +55,7 @@
     </ClInclude>
     <ClInclude Include="NoteModel.h" />
     <ClInclude Include="FbxModel.h" />
+    <ClInclude Include="PatternTool.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp" />
@@ -91,6 +92,7 @@
     <ClCompile Include="sound.cpp" />
     <ClCompile Include="NoteModel.cpp" />
     <ClCompile Include="FbxModel.cpp" />
+    <ClCompile Include="PatternTool.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="resource.rc" />
